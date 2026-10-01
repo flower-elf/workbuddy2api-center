@@ -28,7 +28,7 @@ while [ -L "$SOURCE" ]; do
   esac
 done
 HERE="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-SCRIPT="$HERE/wb_proxy.py"
+SCRIPT="$HERE/app/wb_proxy.py"
 
 case "$PORT" in
   ''|*[!0-9]*)
@@ -39,7 +39,7 @@ case "$PORT" in
 esac
 
 if [ ! -f "$SCRIPT" ]; then
-  echo "[ERROR] wb_proxy.py not found next to this script."
+  echo "[ERROR] app/wb_proxy.py not found."
   echo "        expected: $SCRIPT"
   exit 1
 fi

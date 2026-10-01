@@ -1,0 +1,110 @@
+/* 账号页：筛选卡、账号表、行内控件、弹窗里的步骤与二维码。 */
+
+.filter-card { display: flex; flex-direction: column; gap: 12px; }
+@media (min-width: 1024px) {
+  .filter-card { flex-direction: row; align-items: center; gap: 16px; }
+  .filter-card .input-search { flex: 1 1 260px; }
+  .filter-card .chips { flex: 0 0 auto; }
+}
+.filter-card .chips { flex-wrap: wrap; }
+
+.table-accounts th:nth-child(1) { width: 226px; }
+.table-accounts th:nth-child(2) { width: 152px; }
+.table-accounts th:nth-child(3) { width: 132px; }
+.table-accounts th:nth-child(4) { width: 132px; }
+.table-accounts th:nth-child(5) { width: 148px; }
+.table-accounts th:nth-child(6) { width: 168px; }
+.table-accounts th:nth-child(7) { width: 104px; }
+.table-accounts th:nth-child(8) { width: 96px; }
+.table-accounts th:nth-child(9) { width: 120px; }
+.table-accounts td { vertical-align: middle; }
+/* 表头与数据都居中，每列内容与标题对齐 */
+.table-accounts th,
+.table-accounts th.right,
+.table-accounts th.actions { text-align: center; }
+.table-accounts td,
+.table-accounts td.right,
+.table-accounts td.actions { text-align: center; }
+
+.account-cell { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.account-cell .row-wrap { display: inline; }
+.account-cell .row-wrap .badge { margin-left: 6px; vertical-align: middle; }
+.account-cell .cell-mono { word-break: break-all; }
+
+/* 账号列的技术信息：默认只显示昵称与版本，由「更多」菜单的「显示技术信息」展开 */
+.cell-label { margin-right: 6px; font-family: var(--font-sans); font-size: 11px; color: var(--muted-foreground); }
+
+.status-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+.token-cell, .credit-cell { display: flex; flex-direction: column; gap: 4px; min-width: 104px; }
+.token-cell .bar, .credit-cell .bar { width: 100%; max-width: 96px; }
+
+.row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; min-width: 96px; }
+
+/* 表格里每列的内容跟着居中的表头一起居中；窄屏卡片保持左对齐 */
+.table-accounts .account-cell { justify-content: center; }
+.table-accounts .status-cell { justify-content: center; }
+.table-accounts .credit-cell, .table-accounts .token-cell { align-items: center; }
+.table-accounts .row-actions { justify-content: center; }
+
+/* 页头「更多」菜单 */
+.menu { position: relative; display: inline-block; }
+.menu-toggle { gap: 6px; }
+.menu-panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 232px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  border-radius: 16px; border: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+  background: var(--popover); box-shadow: var(--shadow-dialog);
+}
+.menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px;
+  border: 0; border-radius: 10px; background: transparent; text-align: left; font-size: 12px;
+}
+.menu-item:hover { background: var(--accent); }
+.menu-item.tone-danger { color: var(--danger); }
+.menu-item svg.lucide { width: 14px; height: 14px; }
+.menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+
+/* 窄屏卡片里的字段网格 */
+.mobile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.mobile-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mobile-field .select, .mobile-field .input { width: 100%; }
+.mobile-field .input-priority { width: 72px; }
+.mobile-item .row-actions { justify-content: flex-start; }
+
+.card-note {
+  display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+  border-top: 1px solid color-mix(in oklab, var(--border) 40%, transparent);
+  font-size: 11px; line-height: 16px; color: var(--muted-foreground);
+}
+.card-note svg.lucide { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* 添加账号弹窗 */
+.realm-choice { display: flex; flex-direction: column; gap: 6px; }
+.realm-choice .seg { width: 100%; }
+.step-list { display: flex; flex-direction: column; gap: 10px; }
+.step { display: flex; align-items: flex-start; gap: 8px; opacity: .55; }
+.step.active, .step.done { opacity: 1; }
+.step-n {
+  width: 20px; height: 20px; border-radius: 9999px; flex-shrink: 0; display: grid; place-items: center;
+  background: var(--muted); font-size: 11px; font-weight: 600;
+}
+.step.active .step-n { background: var(--primary); color: var(--primary-foreground); }
+.step.done .step-n { background: color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); }
+.step-t { font-size: 12px; line-height: 20px; padding-top: 0; }
+.step-message { margin: 0; font-size: 11px; line-height: 16px; }
+.qr-panel { display: flex; flex-direction: column; gap: 12px; border-radius: 16px; background: var(--muted); padding: 12px; }
+@media (min-width: 480px) { .qr-panel { flex-direction: row; align-items: center; } }
+.qr-image { background: #fff; border-radius: 12px; padding: 4px; align-self: center; }
+.qr-image svg { width: 132px; height: 132px; display: block; }
+.qr-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+.link-box {
+  font-family: var(--font-mono); font-size: 11px; line-height: 16px; word-break: break-all;
+  max-height: 64px; overflow-y: auto; border-radius: 10px; background: var(--background); padding: 8px 10px;
+}
+
+/* 导入弹窗 */
+.preview-group { display: flex; flex-direction: column; gap: 4px; }
+.preview-list { margin: 0; padding-left: 18px; font-size: 11px; line-height: 18px; color: var(--muted-foreground); }
+.preview-list code { font-size: 11px; }
+.scan-group { display: flex; flex-direction: column; gap: 6px; }

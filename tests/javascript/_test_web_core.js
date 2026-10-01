@@ -1,0 +1,165 @@
+/* 看板公共模块：存储容错、请求错误处理、查看版本与默认出口的分离、格式化边界、命令面板匹配、路由解析。 */
+import assert from 'node:assert/strict';
+
+const storageBlocked = {
+  getItem() { throw new Error('SecurityError: storage denied'); },
+  setItem() { throw new Error('SecurityError: storage denied'); },
+  removeItem() { throw new Error('SecurityError: storage denied'); },
+};
+function memoryStorage() {
+  const map = new Map();
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+}
+
+// 浏览器全局对象的最小替身：store.js 读取地址栏并用 history.replaceState 改写 ?view=
+globalThis.location = new URL('http://panel.local/');
+globalThis.history = { replaceState: (_s, _t, url) => { globalThis.location = new URL(url, 'http://panel.local'); } };
+globalThis.localStorage = storageBlocked;
+globalThis.sessionStorage = storageBlocked;
+
+let server = { status: 200, body: {} };
+const requests = [];
+globalThis.fetch = async (url, init = {}) => {
+  requests.push({ url, init });
+  const { status, body } = typeof server === 'function' ? server(url, init) : server;
+  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  return { status, ok: status >= 200 && status < 300, text: async () => text, json: async () => JSON.parse(text) };
+};
+
+const storage = await import('../../app/web/js/core/storage.js');
+const api = await import('../../app/web/js/core/api.js');
+const store = await import('../../app/web/js/core/store.js');
+const format = await import('../../app/web/js/core/format.js');
+const refresh = await import('../../app/web/js/core/refresh.js');
+const palette = await import('../../app/web/js/ui/palette-logic.js');
+const router = await import('../../app/web/js/core/router.js');
+
+// ---- 存储被禁用时读写都不抛错；可用时能正常读写与删除
+assert.equal(storage.readStore('x'), null);
+storage.writeStore('x', '1');
+globalThis.localStorage = memoryStorage();
+storage.writeStore('wb-test', 'on');
+assert.equal(storage.readStore('wb-test'), 'on');
+storage.writeStore('wb-test', null);
+assert.equal(storage.readStore('wb-test'), null);
+
+// ---- 自动刷新间隔：默认 60 秒，0 表示不自动刷新，空值回到默认，最多一小时
+assert.equal(refresh.refreshSeconds(), 60, '没设置过时用默认值');
+assert.equal(refresh.setRefreshSeconds('30'), 30);
+assert.equal(refresh.refreshSeconds(), 30);
+assert.equal(refresh.setRefreshSeconds('0'), 0);
+assert.equal(refresh.refreshSeconds(), 0, '0 要存下来，不能回到默认');
+assert.equal(refresh.setRefreshSeconds(''), 60, '空值回到默认');
+assert.equal(refresh.setRefreshSeconds('99999'), 3600, '超过上限按一小时');
+assert.equal(refresh.setRefreshSeconds('-5'), 0);
+const intervalEvents = [];
+const stopIntervals = refresh.onRefreshSeconds((seconds) => intervalEvents.push(seconds));
+refresh.setRefreshSeconds(15);
+assert.deepEqual(intervalEvents, [15]);
+stopIntervals();
+refresh.setRefreshSeconds(20);
+assert.deepEqual(intervalEvents, [15], '取消订阅后不再收到通知');
+refresh.setRefreshSeconds(60);
+assert.equal(storage.readStore('wb-refresh-interval'), null, '默认值不写存储');
+globalThis.localStorage = storageBlocked;
+assert.equal(refresh.refreshSeconds(), 60, '存储被禁用时用默认值');
+assert.doesNotThrow(() => refresh.setRefreshSeconds(5));
+globalThis.localStorage = memoryStorage();
+
+// ---- 请求错误：服务端的错误信息原样带出；401 触发会话失效处理；非 JSON 正文不会让调用方拿到空信息
+let lost = 0;
+api.onUnauthorized(() => { lost += 1; });
+server = { status: 400, body: { error: { message: 'current password is wrong' } } };
+await assert.rejects(api.postJSON('/panel/password', {}), (err) => err instanceof api.ApiError && err.status === 400
+  && err.message === 'current password is wrong' && !api.isAuthError(err));
+assert.equal(lost, 0, '400 不应被当作会话失效');
+server = { status: 401, body: { error: { message: 'panel password required' } } };
+await assert.rejects(api.getJSON('/accounts'), (err) => api.isAuthError(err));
+assert.equal(lost, 1);
+server = { status: 502, body: '<html>Bad Gateway</html>' };
+await assert.rejects(api.getJSON('/usage'), (err) => err.status === 502 && err.message.includes('Bad Gateway'));
+server = { status: 200, body: { ok: true } };
+assert.deepEqual(await api.postJSON('/x', { a: 1 }), { ok: true });
+assert.equal(requests.at(-1).init.headers['Content-Type'], 'application/json');
+assert.equal(requests.at(-1).init.body, '{"a":1}');
+
+// 非 ASCII 的 Key 放不进请求头，必须忽略，否则 fetch 会在发出前抛错
+api.setApiKey('密钥');
+assert.equal(api.authHeaders().Authorization, undefined);
+api.setApiKey('sk-good');
+assert.equal(api.authHeaders().Authorization, 'Bearer sk-good');
+api.setApiKey('');
+
+// ---- 查看的版本与网关默认出口相互独立
+let exit = 'intl';
+server = () => ({ status: 200, body: { current: exit, ok: true } });
+globalThis.location = new URL('http://panel.local/');
+await store.initRealms();
+assert.equal(store.getState().viewRealm, 'intl', '启动时查看的版本跟随默认出口');
+exit = 'cn';
+globalThis.location = new URL('http://panel.local/?view=intl');
+await store.initRealms();
+assert.equal(store.getState().viewRealm, 'intl', '地址栏 ?view= 优先');
+assert.equal(store.getState().activeRealm, 'cn');
+store.setViewRealm('cn');
+exit = 'intl';
+const seen = [];
+const off = store.subscribe((reason) => seen.push(reason));
+await store.refreshActiveRealm();
+assert.equal(store.getState().activeRealm, 'intl', '默认出口被刷新');
+assert.equal(store.getState().viewRealm, 'cn', '刷新默认出口不得改动查看的版本');
+assert.deepEqual(seen, ['activeRealm']);
+off();
+assert.equal(globalThis.location.searchParams.get('view'), 'cn', '手动切换的版本写进地址栏，刷新页面后保持');
+assert.throws(() => store.setViewRealm('eu'));
+
+// ---- 格式化边界
+assert.equal(format.fmtCredit(0), '0');
+assert.equal(format.fmtCredit(0.12345), '0.1235');
+assert.equal(format.fmtCredit(12.5), '12.50');
+assert.equal(format.fmtCredit(1234.4), '1,234');
+assert.equal(format.fmtCompact(999), '999');
+assert.equal(format.fmtCompact(1234), '1.2k');
+assert.equal(format.fmtCompact(56789), '57k');
+assert.equal(format.fmtCompact(3400000), '3.4M');
+assert.equal(format.fmtRemain(0), '已过期');
+assert.equal(format.fmtRemain(59), '1 分钟');
+assert.equal(format.fmtRemain(3600), '1.0 小时');
+assert.equal(format.fmtRemain(86400 * 2.5), '2.5 天');
+const now = new Date(2026, 9, 1, 0, 30).getTime();
+assert.equal(format.fmtDateTimeMarked(new Date(2026, 8, 30, 23, 59, 1).getTime(), now), '昨天 23:59:01', '跨月的前一天也是昨天');
+assert.equal(format.fmtDateTimeMarked(new Date(2026, 8, 29, 8, 0, 0).getTime(), now), '09-29 08:00:00');
+assert.equal(format.fmtDateTimeMarked(now / 1000, now), '00:30:00', '秒级时间戳同样识别');
+assert.equal(format.fmtAgo(now + 5000, now), '刚刚');
+assert.equal(format.fmtAgo(null, now), '从未');
+assert.equal(format.fmtUntil(now - 1, now), '已到期');
+assert.equal(format.fmtUntil(now + 3 * 86400000 + 1000, now), '3 天后');
+assert.equal(format.barColor(100), 'var(--success)');
+assert.equal(format.barColor(50.1), 'var(--success)');
+assert.equal(format.barColor(50), 'var(--warning)', '正好一半按黄色');
+assert.equal(format.barColor(25), 'var(--warning)');
+assert.equal(format.barColor(24.9), 'var(--danger)');
+assert.equal(format.barColor(0), 'var(--danger)');
+assert.equal(format.barColor(null), 'var(--danger)');
+
+// ---- 命令面板：名称全等优先于前缀与包含；多个词同时满足才算匹配；空查询保持登记顺序
+const entries = palette.paletteEntries();
+assert.equal(palette.searchPalette(entries, '').length, entries.length);
+assert.ok(entries.some((e) => e.path === 'settings' && e.sub === 'proxy'), '设置页标签可以直接跳转');
+assert.equal(palette.searchPalette(entries, '账号')[0].path, 'accounts');
+assert.equal(palette.searchPalette(entries, '日志')[0].path, 'requests', '包含「日志」的页面里，登记顺序在前的排前面');
+const both = palette.searchPalette(entries, '代理 设置');
+assert.equal(both.length, 1);
+assert.equal(both[0].sub, 'proxy');
+assert.deepEqual(palette.searchPalette(entries, '不存在的页面'), []);
+
+// ---- 路由解析
+assert.deepEqual(router.parseHash('#/settings/proxy'), { path: 'settings', sub: 'proxy' });
+assert.deepEqual(router.parseHash(''), { path: 'dashboard', sub: '' });
+assert.equal(router.hrefFor('settings', 'about'), '#/settings/about');
+
+console.log('web core assertions passed');

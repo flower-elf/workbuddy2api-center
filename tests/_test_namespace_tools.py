@@ -5,15 +5,14 @@ stamping are pure transformations, so every case feeds a synthetic payload and
 asserts the shape that leaves for the upstream and the shape that returns to
 the client.
 """
-import json
 import os
 import sys
+import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("ACCOUNTS_DIR",
-                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "_acc"))
-os.environ.setdefault("USAGE_DIR",
-                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "_use"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+_TMP = tempfile.mkdtemp(prefix="wb-namespace-")
+os.environ["ACCOUNTS_DIR"] = os.path.join(_TMP, "accounts")
+os.environ["WB_PROXY_USAGE_DIR"] = _TMP
 
 import wb_proxy as P
 

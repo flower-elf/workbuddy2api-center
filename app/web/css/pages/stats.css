@@ -1,0 +1,30 @@
+/* 用量页专属样式：趋势图容器、模型分布标签、用量占比条、窄屏下折叠次要列。 */
+
+.stats-chart { position: relative; height: 260px; }
+.stats-chart canvas { width: 100% !important; height: 100% !important; display: block; }
+.stats-chart .chart-empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+}
+
+/* 模型分布：一行里放多个模型的用量标签，宽度不够时换行 */
+.model-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.model-pill {
+  border-radius: 9999px; background: var(--secondary); padding: 1px 8px;
+  font-size: 11px; white-space: nowrap;
+}
+.model-pill .cell-mono { display: inline; font-size: 11px; color: var(--foreground); }
+
+/* 用量占比：进度条画在固定宽度的轨道里，轨道与百分比文字一起决定单元格宽度，进度条不会伸出单元格 */
+.share-cell { white-space: nowrap; }
+.share-track { display: inline-block; width: 80px; margin-right: 6px; vertical-align: middle; }
+.share-bar { display: block; height: 6px; border-radius: 9999px; background: var(--chart-1); }
+.share-pct { vertical-align: middle; }
+
+/* 合计行：底色与数据行区分开 */
+.table tr.matrix-summary { background: color-mix(in oklab, var(--info) 6%, transparent); }
+.table tr.matrix-summary:hover { background: color-mix(in oklab, var(--info) 10%, transparent); }
+
+/* 窗口不够宽时先收起「输入 / 输出 / 思考」与端到端耗时两列，避免表格出现横向滚动条 */
+@media (max-width: 900px) {
+  .table th.matrix-opt, .table td.matrix-opt { display: none; }
+}

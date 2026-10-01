@@ -3,11 +3,12 @@
 No network: feeds synthetic chat-completion objects/chunks into the translation
 functions and asserts the Responses-API shapes that Codex depends on.
 """
-import json, os, sys
+import json, os, sys, tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("ACCOUNTS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_acc"))
-os.environ.setdefault("USAGE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_use"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+_TMP = tempfile.mkdtemp(prefix="wb-custom-tools-")
+os.environ["ACCOUNTS_DIR"] = os.path.join(_TMP, "accounts")
+os.environ["WB_PROXY_USAGE_DIR"] = _TMP
 
 import wb_proxy as P
 

@@ -32,8 +32,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # 看板模块与 JS 套件是不带 package.json 的 ESM 文件，依赖 Node 22 起默认开启的模块语法识别。
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - name: Run every suite
         run: python tests/run_all.py

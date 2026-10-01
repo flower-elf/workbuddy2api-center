@@ -1,0 +1,21 @@
+/* 设置页：代理槽探测结果、运行信息表。 */
+
+.select-wide { min-width: 190px; max-width: 260px; }
+
+.discover-box {
+  margin-top: 12px; display: flex; flex-direction: column; gap: 6px;
+  border-radius: 16px; background: color-mix(in oklab, var(--background) 60%, transparent); padding: 12px;
+}
+
+/* 代理槽编辑器：每行都有可编辑的输入框，窄屏下宁可让表格横向滚动，也不要把输入框挤成几像素。 */
+.slot-table { min-width: 640px; }
+.slot-table td:first-child { width: 28%; }
+.slot-table td:nth-child(2) { width: 40%; }
+
+.about-rows { display: flex; flex-direction: column; gap: 6px; }
+.about-row {
+  display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 10px 12px; font-size: 12px;
+  background: color-mix(in oklab, var(--background) 60%, transparent);
+}
+.about-row .about-key { width: 110px; flex-shrink: 0; color: var(--muted-foreground); }
+.about-row .about-value { flex: 1; min-width: 0; }

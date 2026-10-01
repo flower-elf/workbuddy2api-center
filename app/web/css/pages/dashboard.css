@@ -1,0 +1,28 @@
+/* 仪表盘专属样式：趋势图容器、账号健康快照格子、网关出口的信息行。 */
+
+/* 趋势图容器要有确定高度，canvas 才能按容器高度绘制 */
+.dash-chart { position: relative; height: 220px; }
+.dash-chart canvas { width: 100% !important; height: 100% !important; display: block; }
+.dash-chart .chart-empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+}
+
+/* 账号健康快照：最多 9 格，窄屏一列、中等屏两列、宽屏三列 */
+.snap-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+@media (min-width: 640px) { .snap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .snap-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.snap-tile {
+  display: flex; flex-direction: column; gap: 8px;
+  border-radius: 16px; background: color-mix(in oklab, var(--background) 60%, transparent);
+  padding: 12px; min-width: 0;
+}
+.snap-name { font-size: 13px; font-weight: 500; }
+
+/* 网关出口卡片里的接口地址行 */
+.exit-url {
+  display: flex; align-items: center; gap: 8px;
+  border-radius: 14px; background: color-mix(in oklab, var(--background) 60%, transparent);
+  padding: 8px 12px;
+}
+.exit-url code { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; }

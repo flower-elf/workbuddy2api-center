@@ -17,16 +17,28 @@ path, so the number of response.created frames and the final event are observed
 rather than assumed. No network access required.
 """
 
+import contextlib
+import http.server
 import json
 import os
+import socket
 import sys
 import tempfile
+import threading
+import time
+import tracemalloc
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 
 import wb_proxy as proxy
 import wb_webtools as W
+
+# 仓库里的 accounts/ 与 usage/ 归正在跑的网关用：这个进程一律指向临时目录。
+_TMP_HOME = tempfile.mkdtemp(prefix="wb-webtools-")
+proxy.ACCOUNTS_DIR = _TMP_HOME
+proxy.USAGE_DIR = os.path.join(_TMP_HOME, "usage")
+proxy.USAGE_LOG = os.path.join(proxy.USAGE_DIR, "usage.jsonl")
 
 PASS = FAIL = 0
 
@@ -432,6 +444,231 @@ check("with the switch on calls are collected",
 check("private markers never reach the upstream body",
       not any(str(k).startswith("_") for k in proxy.build_upstream_body(
           dict(chat_on, _namespace_map={"js": "node_repl"}, _web_tools=True))))
+
+print()
+print("[11] web_fetch only reaches addresses it checked, and rechecks every redirect")
+
+PUBLIC_IP = "93.184.216.34"        # example.com 的地址：只用字面量，不解析
+MARKER = "local-secret-marker"
+_real_create_connection = socket.create_connection
+
+
+class Site(http.server.BaseHTTPRequestHandler):
+    """本机测试服务；answer 由用例给，请求头留在 server.last_headers。"""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        self.server.last_headers = dict(self.headers)
+        self.server.answer(self)
+
+
+def start_site(answer):
+    site = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Site)
+    site.daemon_threads = True
+    site.answer = answer
+    site.last_headers = {}
+    site.written = 0
+    threading.Thread(target=site.serve_forever, daemon=True).start()
+    return site
+
+
+@contextlib.contextmanager
+def net_to_site(site, seen, dns=None):
+    """把最后一跳换到本机测试服务：地址校验走真实代码，只有网络这一段是假的。
+
+    dns 可以模拟解析器给出的地址（sslip.io 这类名字在 CI 里未必解析得到）。
+    """
+    port = site.server_address[1]
+
+    def create_connection(address, timeout=None, source_address=None):
+        seen.append(address)
+        return _real_create_connection(("127.0.0.1", port), timeout, source_address)
+
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.object(socket, "create_connection", create_connection))
+        if dns:
+            real_resolve = socket.getaddrinfo
+
+            def resolve(host, *args, **kwargs):
+                if host in dns:
+                    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))
+                            for ip in dns[host]]
+                return real_resolve(host, *args, **kwargs)
+            stack.enter_context(mock.patch.object(socket, "getaddrinfo", resolve))
+        yield
+
+
+def serve_html(req, body=b"<html><body>hello " + MARKER.encode() + b"</body></html>"):
+    req.send_response(200)
+    req.send_header("Content-Type", "text/html; charset=utf-8")
+    req.send_header("Content-Length", str(len(body)))
+    req.end_headers()
+    req.wfile.write(body)
+
+
+site = start_site(serve_html)
+port = site.server_address[1]
+
+for label, url, dns in (
+    ("localhost. (trailing dot)", "http://localhost.:%d/" % port, None),
+    ("[::ffff:127.0.0.1]", "http://[::ffff:127.0.0.1]:%d/" % port, None),
+    ("127-0-0-1.sslip.io", "http://127-0-0-1.sslip.io:%d/" % port,
+     {"127-0-0-1.sslip.io": ["127.0.0.1"]}),
+    ("2130706433 (decimal loopback)", "http://2130706433:%d/" % port,
+     {"2130706433": ["127.0.0.1"]}),
+    ("one public and one private address", "http://mixed.example:%d/" % port,
+     {"mixed.example": [PUBLIC_IP, "10.0.0.7"]}),
+):
+    seen = []
+    with net_to_site(site, seen, dns):
+        out = W.fetch(url)
+    check("%s is refused before connecting" % label,
+          out.startswith("Error:") and "not allowed" in out and MARKER not in out and seen == [],
+          (out, seen))
+
+seen = []
+with net_to_site(site, seen):
+    page = W.fetch("http://%s:%d/page" % (PUBLIC_IP, port))
+check("a public address is fetched normally", page.startswith("URL: ") and MARKER in page, page[:160])
+check("and it was the checked IP that got connected", seen == [(PUBLIC_IP, port)], seen)
+check("the Host header carries the name and port",
+      site.last_headers.get("Host") == "%s:%d" % (PUBLIC_IP, port), site.last_headers.get("Host"))
+check("the request asks for identity encoding (so the byte cap means bytes)",
+      site.last_headers.get("Accept-Encoding") == "identity", site.last_headers.get("Accept-Encoding"))
+with net_to_site(site, []):
+    paged = W.fetch("http://%s:%d/page" % (PUBLIC_IP, port), start_index=6)
+check("startIndex pages through the fetched text",
+      "Characters: 6-%d of" % (len(MARKER) + 6) in paged, paged[:80])
+
+seen = []
+with net_to_site(site, seen):
+    hopped = W.fetch("http://10.0.0.9/goto")
+check("an ordinary private address never gets a socket",
+      hopped.startswith("Error:") and seen == [], (hopped, seen))
+
+
+def serve_private_hop(req):
+    if req.path == "/secret":
+        serve_html(req)
+        return
+    req.send_response(302)
+    req.send_header("Location", "http://127.0.0.1:%d/secret" % req.server.server_address[1])
+    req.send_header("Content-Length", "0")
+    req.end_headers()
+
+
+hop_site = start_site(serve_private_hop)
+hop_port = hop_site.server_address[1]
+seen = []
+with net_to_site(hop_site, seen):
+    hopped = W.fetch("http://%s:%d/from" % (PUBLIC_IP, hop_port))
+check("a redirect to a private address is refused",
+      hopped.startswith("Error:") and "not allowed" in hopped and MARKER not in hopped, hopped)
+check("and the private address was never connected", all(a[0] == PUBLIC_IP for a in seen), seen)
+
+
+def serve_hop(req):
+    if req.path == "/to":
+        serve_html(req)
+        return
+    req.send_response(302)
+    req.send_header("Location", "http://%s:%d/to" % (PUBLIC_IP, req.server.server_address[1]))
+    req.send_header("Content-Length", "0")
+    req.end_headers()
+
+
+hop2 = start_site(serve_hop)
+seen = []
+with net_to_site(hop2, seen):
+    followed = W.fetch("http://%s:%d/from" % (PUBLIC_IP, hop2.server_address[1]))
+check("a redirect to a public address is still followed",
+      followed.startswith("URL: ") and MARKER in followed, followed[:160])
+check("with one extra connection", len(seen) == 2, seen)
+
+
+def serve_loop(req):
+    req.send_response(302)
+    req.send_header("Location", "/loop")
+    req.send_header("Content-Length", "0")
+    req.end_headers()
+
+
+loop_site = start_site(serve_loop)
+seen = []
+with net_to_site(loop_site, seen):
+    looped = W.fetch("http://%s:%d/loop" % (PUBLIC_IP, loop_site.server_address[1]))
+check("endless redirects stop at the limit",
+      looped.startswith("Error:") and "Too many redirects" in looped, looped)
+check("after at most MAX_REDIRECTS hops", len(seen) == W.MAX_REDIRECTS + 1, len(seen))
+
+print()
+print("[12] the response body has a byte cap, and a whole fetch has a deadline")
+
+SIZE = 64 * 1024 * 1024           # 64 MiB
+BLOCK = b"a" * 65536
+
+
+def serve_big(req):
+    req.send_response(200)
+    req.send_header("Content-Type", "text/html")
+    req.send_header("Content-Length", str(SIZE))
+    req.end_headers()
+    try:
+        while req.server.written < SIZE:
+            req.wfile.write(BLOCK)
+            req.server.written += len(BLOCK)
+    except OSError:
+        pass                      # 客户端在上限处断开，正是要看到的结果
+
+
+big_site = start_site(serve_big)
+seen = []
+tracemalloc.start()
+with net_to_site(big_site, seen):
+    big = W.fetch("http://%s:%d/big" % (PUBLIC_IP, big_site.server_address[1]))
+peak = tracemalloc.get_traced_memory()[1]
+tracemalloc.stop()
+check("a 64 MiB response comes back as a normal, capped page",
+      big.startswith("URL: ") and len(big) < W.MAX_FETCH_CHARS + 2000, len(big))
+check("and is marked as cut at the byte cap",
+      "cut at %d bytes" % W.MAX_RESPONSE_BYTES in big, big[:200])
+check("the peak does not follow the response size", peak < 32 * 1024 * 1024, peak)
+check("the server never finished sending", big_site.written < SIZE, big_site.written)
+
+
+def serve_slow(req):
+    req.send_response(200)
+    req.send_header("Content-Type", "text/html")
+    req.send_header("Content-Length", "1000000")
+    req.end_headers()
+    try:
+        for _ in range(1000000):
+            req.wfile.write(b"x")
+            time.sleep(0.2)
+    except OSError:
+        pass
+
+
+slow_site = start_site(serve_slow)
+seen = []
+# 用 _remaining 同款时钟：墙上时钟与 monotonic 在 CI 机器上能差出几毫秒，
+# 用 time.time() 量这次抓取会让下界断言偶发不成立（实测 0.994s）。
+started = time.monotonic()
+with mock.patch.object(W, "FETCH_DEADLINE", 1), net_to_site(slow_site, seen):
+    slow = W.fetch("http://%s:%d/slow" % (PUBLIC_IP, slow_site.server_address[1]))
+elapsed = time.monotonic() - started
+check("a dribbling response is aborted by the total deadline",
+      slow.startswith("Error:") and "Timed out" in slow, slow)
+check("and it stops near the deadline, not after the per-read timeout",
+      1.0 <= elapsed < 5.0, elapsed)
+
+for one in (site, hop_site, hop2, loop_site, big_site, slow_site):
+    one.shutdown()
+    one.server_close()
 
 print()
 print("PASS=%d FAIL=%d" % (PASS, FAIL))

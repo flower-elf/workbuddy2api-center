@@ -1,0 +1,18 @@
+/* 任务页：调度器日志与成长任务执行日志。 */
+
+.log-box {
+  max-height: 190px; overflow-y: auto; border-radius: 14px; padding: 10px 12px;
+  background: color-mix(in oklab, var(--background) 60%, transparent);
+  font-family: var(--font-mono); font-size: 11px; line-height: 18px;
+}
+.log-line { white-space: pre-wrap; word-break: break-word; }
+
+.sched-logs-title { font-size: 11px; color: var(--muted-foreground); }
+
+/* 移动端把四块折成一次一块：上面是分段切换，下面只显示选中的那块。 */
+.tasks-switch { display: none; }
+@media (max-width: 767px) {
+  .tasks-switch { display: block; }
+  .task-block { display: none; }
+  .task-block.active { display: block; }
+}

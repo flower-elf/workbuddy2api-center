@@ -1,11 +1,10 @@
 """Deterministic tests for proxy-slot definitions (no network)."""
 
-import json
 import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 
 import wb_settings as S
 
@@ -44,7 +43,8 @@ check(
     [s["url"] for s in slots] == ["http://a:1", "http://b:2", "socks5://c:3"],
     slots,
 )
-check("blank id auto-assigned", slots[1]["id"] == "slot-2", slots[1]["id"])
+check("blank id auto-assigned without reusing a stored id",
+      slots[1]["id"] and slots[1]["id"] not in ("slot-1", "slot-2", "slot-3"), slots[1]["id"])
 check("missing enabled defaults True", slots[1]["enabled"] is True)
 check("name preserved when present", slots[1]["name"] == "auto", slots[1]["name"])
 check("name defaults to id when blank", slots[2]["name"] == "slot-3", slots[2]["name"])
@@ -182,8 +182,8 @@ print()
 print("[8] proxy_slots_view counts only enabled accounts")
 import importlib
 
-os.environ.setdefault("ACCOUNTS_DIR", d2)
-os.environ.setdefault("USAGE_DIR", tempfile.mkdtemp(prefix="wb-slots-use-"))
+os.environ["ACCOUNTS_DIR"] = d2
+os.environ["WB_PROXY_USAGE_DIR"] = tempfile.mkdtemp(prefix="wb-slots-use-")
 P = importlib.import_module("wb_proxy")
 P.ACCOUNTS_DIR = d2
 P.POOL = pool

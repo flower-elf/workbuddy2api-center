@@ -1,6 +1,8 @@
 # 核心机密数据（千万不能上传到公共仓库）
 accounts/*.json
 !accounts/README.txt
+# 服务器目录的本地副本（可随时重新获取）
+accounts/cache/
 
 # 运行时日志和用量统计
 usage/*.jsonl

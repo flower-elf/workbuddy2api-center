@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+_TMP = tempfile.mkdtemp(prefix="wb-health-")
+os.environ["ACCOUNTS_DIR"] = os.path.join(_TMP, "accounts")
+os.environ["WB_PROXY_USAGE_DIR"] = _TMP
 
 import wb_proxy as proxy
 import wb_settings as settings

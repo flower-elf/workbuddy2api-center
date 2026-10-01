@@ -1,5 +1,5 @@
 services:
-  wb-proxy:
+  wb-proxy-center:
     volumes:
       # Linux WorkBuddy desktop login credentials, read-only for local scanning.
       # ${HOME} must be exported by your shell (Linux/macOS) and the host path must exist.

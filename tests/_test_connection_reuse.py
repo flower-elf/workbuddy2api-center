@@ -25,7 +25,8 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)          # the gateway lives one level up
+ROOT = os.path.dirname(HERE)          # the gateway lives in <root>/app
+APP = os.path.join(ROOT, "app")
 PY = os.path.join(ROOT, "python", "python.exe")
 if not os.path.exists(PY):
     PY = sys.executable
@@ -61,7 +62,7 @@ with open(os.path.join(store, "settings.json"), "w", encoding="utf-8") as fh:
                              "enabled": True}]}, fh)
 
 proc = subprocess.Popen(
-    [PY, os.path.join(ROOT, "wb_proxy.py"), "--port", str(port), "--host", "127.0.0.1",
+    [PY, os.path.join(APP, "wb_proxy.py"), "--port", str(port), "--host", "127.0.0.1",
      "--accounts-dir", store],
     cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
     env=dict(os.environ, WB_PROXY_USAGE_DIR=os.path.join(work, "usage")),
@@ -84,6 +85,32 @@ def wait_ready():
     return False
 
 
+def read_response(sock, timeout=20):
+    """读完整的一条 HTTP/1.1 应答：响应头与 Content-Length 指定长度的正文。
+
+    固定长度的 recv 会把上一条应答的正文残留在连接里，下一轮的断言就会把
+    残留字节当成新应答的开头。
+    """
+    sock.settimeout(timeout)
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        buf += chunk
+    head, _, body = buf.partition(b"\r\n\r\n")
+    length = 0
+    for line in head.split(b"\r\n")[1:]:
+        if line.lower().startswith(b"content-length:"):
+            length = int(line.split(b":", 1)[1].strip() or b"0")
+    while len(body) < length:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        body += chunk
+    return head + b"\r\n\r\n" + body
+
+
 def send_pair(bad_body, label):
     """Bad-key request with `bad_body`, then a good small one, same socket."""
     sock = socket.create_connection(("127.0.0.1", port), timeout=20)
@@ -93,8 +120,7 @@ def send_pair(bad_body, label):
             b"Authorization: Bearer BADKEY\r\nContent-Type: application/json\r\n"
             b"Content-Length: " + str(len(bad_body)).encode() + b"\r\n\r\n" + bad_body
         )
-        time.sleep(1.0)
-        first = sock.recv(400)
+        first = read_response(sock)
 
         small = b'{"model":"x","messages":[{"role":"user","content":"hi"}]}'
         sock.sendall(
@@ -102,9 +128,8 @@ def send_pair(bad_body, label):
             b"Authorization: Bearer GOODKEY\r\nContent-Type: application/json\r\n"
             b"Content-Length: " + str(len(small)).encode() + b"\r\n\r\n" + small
         )
-        time.sleep(2.5)
         try:
-            second = sock.recv(900)
+            second = read_response(sock, 25)
         except Exception as exc:
             second = ("recv error: %s" % exc).encode()
     finally:
@@ -147,7 +172,7 @@ try:
                  b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
     time.sleep(2.5)
     try:
-        resp = sock.recv(900)
+        resp = read_response(sock, 15)
     except Exception:
         resp = b""
     sock.close()
@@ -160,7 +185,7 @@ try:
     sock.sendall(b"GET /" + b"a" * (2 * 1024 * 1024) + b" HTTP/1.1\r\nHost: x\r\n\r\n")
     time.sleep(2.5)
     try:
-        resp = sock.recv(900)
+        resp = read_response(sock, 15)
     except Exception:
         resp = b""
     sock.close()

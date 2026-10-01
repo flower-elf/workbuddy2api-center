@@ -15,14 +15,12 @@ No network: pure payload transformation tests.
 import copy
 import os
 import sys
+import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault(
-    "ACCOUNTS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_acc_rc")
-)
-os.environ.setdefault(
-    "USAGE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_use_rc")
-)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+_TMP = tempfile.mkdtemp(prefix="wb-reasoning-")
+os.environ["ACCOUNTS_DIR"] = os.path.join(_TMP, "accounts")
+os.environ["WB_PROXY_USAGE_DIR"] = _TMP
 
 import wb_proxy as P
 

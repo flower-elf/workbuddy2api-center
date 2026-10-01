@@ -14,7 +14,7 @@ No network access required.
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 
 import wb_accounts
 
@@ -58,7 +58,7 @@ try:
     print("[1] refresh()")
     del seen[:]
     try:
-        acct.refresh()
+        acct.refresh(force=True)
     except Exception:
         pass
     check("refresh() issued a request", bool(seen))
@@ -93,7 +93,7 @@ try:
     plain.proxy = ""
     del seen[:]
     try:
-        plain.refresh()
+        plain.refresh(force=True)
     except Exception:
         pass
     check("direct account sends proxy=''", seen and seen[0] == "", repr(seen[:1]))

@@ -1,8 +1,8 @@
 services:
-  wb-proxy:
+  wb-proxy-center:
     build: .
-    image: ardeyouxipianyi/workbuddy2api-hub:latest
-    container_name: wb-proxy
+    image: ghcr.io/flower-elf/workbuddy2api-center:latest
+    container_name: wb-proxy-center
     restart: unless-stopped
     ports:
       # 左侧宿主端口可自选；右侧是容器内监听端口，必须与下面的 PORT 一致

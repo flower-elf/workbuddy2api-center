@@ -4,13 +4,14 @@ POST /console/as/conversations/ 只是排队；agent 要等客户端接上沙箱
 HTTP + SSE）并请求这一轮才会跑。这里钉住那个调用顺序，以及两种结果怎么上报：
 跑完（completed）和没跑完。
 """
+import http.client
 import io
 import json
 import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 
 import wb_webagent as W
 
@@ -119,10 +120,7 @@ class SseParsingTests(unittest.TestCase):
                           .encode("utf-8"))
         lines.append(b": heartbeat\n\n")
 
-        class FakeResponse(object):
-            fp = io.BytesIO(b"".join(lines))
-
-        channel._read_events(FakeResponse())
+        channel._read_events(io.BytesIO(b"".join(lines)))
         drained = []
         while True:
             item = channel.events.get_nowait()
@@ -133,6 +131,37 @@ class SseParsingTests(unittest.TestCase):
         self.assertEqual(channel.chunks, 1)
         self.assertEqual(len(drained), 3)
         self.assertEqual(drained[-1]["id"], 3)
+
+    def test_a_data_line_split_across_chunks_is_parsed(self):
+        # 真实 HTTPResponse：分块编码把第一条 data 行切在两个 chunk 之间
+        def event(text):
+            payload = {"jsonrpc": "2.0", "method": "session/update",
+                       "params": {"update": {"sessionUpdate": "agent_message_chunk",
+                                             "content": {"type": "text", "text": text}}}}
+            return ("data: " + json.dumps(payload) + "\n\n").encode("utf-8")
+
+        first = event("A")
+        body = b"".join(b"%x\r\n%s\r\n" % (len(piece), piece)
+                        for piece in (first[:25], first[25:], event("B")))
+        raw = (b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+               b"Transfer-Encoding: chunked\r\n\r\n" + body + b"0\r\n\r\n")
+
+        class FakeSocket(object):
+            def makefile(self, mode, *args, **kwargs):
+                return io.BufferedReader(io.BytesIO(raw))
+
+        resp = http.client.HTTPResponse(FakeSocket())
+        resp.begin()
+        channel = W.AcpChannel("https://box.example/acp", "tok", "ua")
+        channel._read_events(resp)
+        texts = []
+        while True:
+            item = channel.events.get_nowait()
+            if item is None:
+                break
+            texts.append(item["params"]["update"]["content"]["text"])
+        self.assertEqual(texts, ["A", "B"])
+        self.assertEqual(channel.chunks, 2)
 
     def test_the_client_capabilities_stay_honest(self):
         # 打卡不需要文件系统/终端：能力声明必须是关的，否则沙箱会等我们回调。

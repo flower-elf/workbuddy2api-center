@@ -14,11 +14,12 @@ client parsed no call, asked again, and the model repeated itself forever.
 
 These tests pin the outbound shape so the deletion cannot come back.
 """
-import json, os, sys
+import json, os, sys, tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("ACCOUNTS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_acc"))
-os.environ.setdefault("USAGE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_use"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+_TMP = tempfile.mkdtemp(prefix="wb-tool-choice-")
+os.environ["ACCOUNTS_DIR"] = os.path.join(_TMP, "accounts")
+os.environ["WB_PROXY_USAGE_DIR"] = _TMP
 
 import wb_proxy as P
 

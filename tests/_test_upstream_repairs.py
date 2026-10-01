@@ -9,15 +9,14 @@ shape that leaves for the upstream.
   3. tool-call pairing repair    - orphaned calls / split results kill a session
 """
 import copy
-import json
 import os
 import sys
+import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("ACCOUNTS_DIR",
-                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "_acc"))
-os.environ.setdefault("USAGE_DIR",
-                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "_use"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+_TMP = tempfile.mkdtemp(prefix="wb-upstream-")
+os.environ["ACCOUNTS_DIR"] = os.path.join(_TMP, "accounts")
+os.environ["WB_PROXY_USAGE_DIR"] = _TMP
 
 import wb_proxy as P
 

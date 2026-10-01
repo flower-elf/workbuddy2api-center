@@ -20,7 +20,7 @@ set "PORT=%~1"
 if "%PORT%"=="" set "PORT=8788"
 set "KEY=%~2"
 set "HERE=%~dp0"
-set "SCRIPT=%HERE%wb_proxy.py"
+set "SCRIPT=%HERE%app\wb_proxy.py"
 
 if not exist "%SCRIPT%" goto no_script
 
@@ -43,15 +43,11 @@ goto run
 :try_py
 rem ---- 3) py launcher ----
 py --version >nul 2>nul
-if errorlevel 1 goto try_codex
+if errorlevel 1 goto no_python
 set "PYEXE=py"
 goto run
 
-:try_codex
-rem ---- 4) Codex bundled runtimes ----
-call :find_codex
-if defined PYEXE goto run
-
+:no_python
 echo [ERROR] No usable Python found.
 echo.
 echo Options:
@@ -63,28 +59,11 @@ pause
 exit /b 1
 
 :no_script
-echo [ERROR] wb_proxy.py not found next to this script.
+echo [ERROR] app\wb_proxy.py not found.
 echo         expected: %SCRIPT%
 echo.
 pause
 exit /b 1
-
-:find_codex
-if not exist "%USERPROFILE%\.cache\codex-runtimes" goto :eof
-for /d %%D in ("%USERPROFILE%\.cache\codex-runtimes\*") do call :probe "%%~D"
-goto :eof
-
-:probe
-if defined PYEXE goto :eof
-for /f "delims=" %%P in ('dir /b /s "%~1\python.exe" 2^>nul') do call :probe_one "%%~P"
-goto :eof
-
-:probe_one
-if defined PYEXE goto :eof
-"%~1" --version >nul 2>nul
-if errorlevel 1 goto :eof
-set "PYEXE=%~1"
-goto :eof
 
 :run
 echo ===========================================================

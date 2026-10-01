@@ -1,8 +1,9 @@
 .git
-__pycache__
-*.pyc
-*.pyo
-*.pyd
+.github
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
 .Python
 python/
 *.bat
@@ -10,3 +11,7 @@ python/
 *.bak*
 temp_*
 .DS_Store
+tests/
+tools/
+accounts/
+usage/

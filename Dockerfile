@@ -10,7 +10,7 @@ WORKDIR /app
 RUN apk add --no-cache tzdata ca-certificates &&     cp /usr/share/zoneinfo/${TZ} /etc/localtime &&     echo "${TZ}" > /etc/timezone
 
 # Copy application files (Zero external pip dependencies needed)
-COPY wb_*.py dashboard.html ./
+COPY app/ ./app/
 
 # Create data directories
 RUN mkdir -p /app/accounts /app/usage
@@ -27,4 +27,4 @@ EXPOSE 8788
 # No --port on purpose: the gateway already reads PORT from the environment
 # (default 8788), and the exec form cannot expand a variable. Keeping the exec
 # form leaves python as PID 1, so `docker stop` still delivers SIGTERM.
-CMD ["python", "wb_proxy.py", "--host", "0.0.0.0", "--lan"]
+CMD ["python", "app/wb_proxy.py", "--host", "0.0.0.0", "--lan"]

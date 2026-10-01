@@ -4,6 +4,8 @@ Run with: python _test_model_cooldowns.py
 No upstream credentials or outbound network are used.
 """
 import atexit
+import calendar
+import email.utils
 import io
 import json
 import os
@@ -19,7 +21,8 @@ import urllib.error
 _startup_dir = tempfile.TemporaryDirectory(prefix="model-cooldowns-")
 atexit.register(_startup_dir.cleanup)
 os.environ["ACCOUNTS_DIR"] = _startup_dir.name
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ["WB_PROXY_USAGE_DIR"] = _startup_dir.name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 
 import wb_accounts as accounts
 import wb_proxy as proxy
@@ -102,11 +105,16 @@ class ModelCooldownTests(unittest.TestCase):
     def drive_one_429(self, account):
         """Drive open_upstream into an upstream 429 with a stubbed urlopen.
 
-        Returns the reset instant the stubbed parser reported, so callers can
-        assert the cooldown the gateway recorded.
+        The body is the shape the CN upstream really sends (code 6004, reset
+        time in the Chinese message), ten minutes from now in UTC+8. Returns
+        that reset instant.
         """
-        reset = time.time() + 600
-        detail = "usage exceeds frequency limit"
+        reset = int(time.time()) + 600
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(reset + 8 * 3600))
+        detail = json.dumps({"code": 6004, "requestId": "r-1", "msg":
+                             "您的使用量已超出频率限制，将在 %s UTC+8 重置，"
+                             "您也可以切换其他模型继续使用。" % stamp},
+                            ensure_ascii=False)
         error = urllib.error.HTTPError("https://upstream.invalid", 429, "rate limit", {},
                                        io.BytesIO(detail.encode("utf-8")))
 
@@ -130,20 +138,16 @@ class ModelCooldownTests(unittest.TestCase):
                 return value or 0
 
         old_pool, old_urlopen = proxy.POOL, accounts.urlopen
-        old_parser = proxy.parse_rate_limit_reset
         proxy.POOL = Pool()
         accounts.urlopen = lambda *args, **kwargs: (_ for _ in ()).throw(error)
-        # Keep these tests on the 429 -> account-list path, independent of the
-        # existing parser's timezone handling.
-        proxy.parse_rate_limit_reset = lambda _detail: reset
         try:
-            with self.assertRaises(proxy.RateLimited):
+            with self.assertRaises(proxy.RateLimited) as caught:
                 proxy.open_upstream({"model": "glm-5.3", "messages": [
                     {"role": "user", "content": "hello"}]}, target_realm="cn")
         finally:
             proxy.POOL, accounts.urlopen = old_pool, old_urlopen
-            proxy.parse_rate_limit_reset = old_parser
             error.close()
+        self.last_wait = caught.exception.wait
         return reset
 
     def test_upstream_429_reaches_accounts_payload(self):
@@ -154,6 +158,32 @@ class ModelCooldownTests(unittest.TestCase):
         self.assertEqual(row["modelCooldowns"][0]["model"], "glm-5.3")
         self.assertLess(abs(row["modelCooldowns"][0]["expiresAt"] - reset), 2)
         self.assertTrue(account.ready(model="another-model"))
+        # 客户端拿到的 retry_after 来自上游给的重置时间
+        self.assertGreater(self.last_wait, 590)
+
+    def test_the_reset_time_is_read_from_both_message_languages(self):
+        cn = json.dumps({"code": 6004, "msg": "您的使用量已超出频率限制，将在 "
+                         "2026-09-29 21:54:31 UTC+8 重置，您也可以切换其他模型继续使用。",
+                         "requestId": "8b62f376c8884291bd9fd3444c6b7bfa"}, ensure_ascii=False)
+        en = json.dumps({"code": 6004, "msg": "usage exceeds frequency limit, your "
+                         "usage will reset at 2026-09-19 18:29:03 UTC+8"})
+        self.assertEqual(proxy.parse_rate_limit_reset(cn),
+                         calendar.timegm((2026, 9, 29, 13, 54, 31, 0, 0, 0)))
+        self.assertEqual(proxy.parse_rate_limit_reset(en),
+                         calendar.timegm((2026, 9, 19, 10, 29, 3, 0, 0, 0)))
+        # 不带时区时按上游所在的 UTC+8 理解
+        self.assertEqual(proxy.parse_rate_limit_reset("将在 2026-09-29 21:54:31 重置"),
+                         calendar.timegm((2026, 9, 29, 13, 54, 31, 0, 0, 0)))
+        # 时间只认 msg，不认 requestId 之类的其它字段
+        self.assertIsNone(proxy.parse_rate_limit_reset(
+            json.dumps({"msg": "busy", "requestId": "2026-09-29 21:54:31"})))
+
+    def test_retry_after_is_used_when_the_body_names_no_time(self):
+        start = time.time()
+        self.assertAlmostEqual(proxy.parse_rate_limit_reset("{}", "120"), start + 120, delta=2)
+        stamp = email.utils.formatdate(start + 300, usegmt=True)
+        self.assertAlmostEqual(proxy.parse_rate_limit_reset("", stamp), start + 300, delta=2)
+        self.assertIsNone(proxy.parse_rate_limit_reset('{"code": 6004, "msg": "busy"}'))
 
     def test_the_auto_switch_setting_is_opt_in(self):
         """Off on a fresh install, and only a real JSON boolean turns it on."""

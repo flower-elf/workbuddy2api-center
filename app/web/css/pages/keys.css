@@ -1,0 +1,41 @@
+/* 密钥页：模型限制标签编辑器、创建成功后的接入信息。 */
+
+.key-form-grid { gap: 12px; }
+.key-form-grid > .field { min-width: 0; }
+
+.tag-editor {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 36px;
+  padding: 5px 8px; border-radius: 12px; border: 1px solid var(--input);
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+.tag-editor:focus-within { box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 15%, transparent); }
+.tag-editor .tag-input {
+  flex: 1; min-width: 140px; height: 24px; padding: 0 4px; border: 0; outline: none; background: transparent; font-size: 13px;
+}
+.tag-editor .tag-input::placeholder { color: var(--muted-foreground); font-size: 12px; }
+/* 密钥内容一行放着输入框与「随机生成」：窄弹窗里按钮换到下一行，输入框保住
+   能完整显示提示文字的最小宽度。 */
+.key-value-row { flex-wrap: wrap; }
+.key-value-row .input { flex: 1 1 260px; }
+.tag {
+  display: inline-flex; align-items: center; gap: 2px; height: 24px; padding: 0 2px 0 8px;
+  border-radius: 9999px; background: var(--background); font-size: 11px; font-family: var(--font-mono);
+}
+.tag-remove {
+  display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 9999px;
+  background: transparent; color: var(--muted-foreground);
+}
+.tag-remove:hover { background: var(--accent); color: var(--foreground); }
+.tag-remove svg.lucide { width: 10px; height: 10px; }
+
+/* 创建成功弹窗里的明文与配置片段 */
+.key-plain {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 16px; background: var(--muted);
+}
+.key-plain code { min-width: 0; font-size: 12px; }
+.snippet { display: flex; flex-direction: column; gap: 4px; border-radius: 16px; background: var(--muted); padding: 10px 12px; }
+.snippet-code {
+  margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--background); overflow-x: auto;
+  font-family: var(--font-mono); font-size: 11px; line-height: 17px; white-space: pre; color: var(--foreground);
+}
+.key-startup-row { border: 1px dashed color-mix(in oklab, var(--border) 80%, transparent); }
