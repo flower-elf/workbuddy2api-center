@@ -1,4 +1,4 @@
-// 全部页面的登记表：底部菜单栏、页内二级导航、命令面板都从这里读取。
+// 全部页面的登记表，底部菜单栏、页内二级导航与命令面板都从这里读取。
 // dock 为 true 的页面出现在菜单栏；section 相同的页面在页头显示为一组二级导航。
 export const ROUTES = [
   { path: 'dashboard', title: '仪表盘', icon: 'BarChart3', dock: true, group: 'overview', groupLabel: '总览',

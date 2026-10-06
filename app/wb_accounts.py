@@ -20,19 +20,13 @@ import wb_webagent
 # ---------------------------------------------------------------------------
 # 网页版通道（issue #75 / #59 / #90）
 #
-# 网页版 app 的「对话」不是 chat/completions，而是 console/as 下的 agent 会话。
-# 这条链路只用 Authorization: Bearer <accessToken> 与 X-User-Id 两个凭据头，
-# 没有桌面端的 X-IDE-* 指纹，所以网关手里同一份账号凭据可以直接用。
+# 网页版 app 的「对话」走 console/as 下的 agent 会话，只用 Authorization: Bearer
+# <accessToken> 与 X-User-Id 两个凭据头，没有桌面端的 X-IDE-* 指纹。
 #
-# 关键的一步（issue #90 实测）：建会话只是**排队**。agent 要等客户端接上这条
-# 会话的沙箱（GET .../{id}/session 返回的 link + token）并请求这一轮才会跑，
-# 否则会话永远停在 CREATING、没有任何输出，也就不算一次有效对话。网页端的顺序
-# 是 建会话 → 取 session → ACP over HTTP+SSE 的 initialize / session/load /
-# session/prompt（实现见 wb_webagent）。
-#
-# 每日活跃奖励认的是「跑完的 agent 会话」：桌面身份发 chat/completions 不计数
-# （issue #75、#59 实测），只建会话不接沙箱同样不计数（#90 实测）。因此国际版
-# 打卡在桌面端对话之外，再走一次这条网页通道，并且把它跑到 completed。
+# 建会话只是排队：agent 要等客户端接上沙箱（GET .../{id}/session 返回的
+# link + token）并请求这一轮才会跑，否则会话停在 CREATING 且没有输出（#90 实测）。
+# 顺序是 建会话 → 取 session → ACP over HTTP+SSE（实现见 wb_webagent）；每日活跃
+# 奖励只认跑完的 agent 会话，因此国际版打卡在桌面端对话之外再走一次并跑到 completed。
 # ---------------------------------------------------------------------------
 WEB_ORIGIN = "https://www.workbuddy.ai"
 WEB_CONVERSATIONS_URL = WEB_ORIGIN + "/console/as/conversations/"
@@ -205,9 +199,8 @@ def detect_realm_from_token(token, domain=None):
 def _access_token_value(raw):
     """取出可用的 access token；形状不对就地抛错。
 
-    桌面端会把令牌存成加密信封（$wbEncrypted），也见过把整段 JSON 当字符串
-    塞进来的文件，这些都不是网关能拿去用的 JWT。导入、扫描与导入行校验共用
-    这一处判断，免得某一路把信封当令牌收下。
+    桌面端会把令牌存成加密信封（$wbEncrypted），也有把整段 JSON 当字符串塞进来
+    的文件, 这些都不是网关能用的 JWT; 导入、扫描与导入行校验共用这一处判断。
     """
     if isinstance(raw, dict) or "$wbEncrypted" in str(raw or ""):
         raise ValueError("access token is encrypted ($wbEncrypted) - "
@@ -226,16 +219,14 @@ DEFAULT_ACCOUNT_PRIORITY = 100
 MAX_ACCOUNT_PRIORITY = 9999
 #: 单账号单模型的并发上限：同一账号的每个模型各自计数，0 表示不限。
 MAX_ACCOUNT_CONCURRENCY = 1000
-#: 评分分配按最近一小时被选中的次数判断账号忙不忙，由 mark_pick() 记下的
-#: 选中时刻算出来。
+#: 评分分配按最近一小时被选中的次数判断账号忙不忙, 由 mark_pick() 记下。
 LOAD_WINDOW_SECONDS = 3600
 #: 账号备注的最长字数，面板与导入行共用同一个上限。
 MAX_ACCOUNT_NOTE = 100
 
-#: 套餐周期时刻的布局与时区，两处都取上游同款：腾讯下发的是 UTC+8 墙钟字符串，
-#: 不带时区标记。按本机时区解析会在非 UTC+8 的机器上整体错开数小时，而界面上
-#: 照样显示一个正常的倒计时，只有对账时才看得出来。上游用
-#: time.ParseInLocation(layout, s, UTC+8)，这里等价。
+#: 套餐周期时刻的布局与时区，取上游同款：腾讯下发的是不带时区标记的 UTC+8 墙钟
+#: 字符串，按本机时区解析会在非 UTC+8 的机器上整体错开数小时，且界面上看不出来；
+#: 上游用 time.ParseInLocation(layout, s, UTC+8)，这里等价。
 PACKAGE_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 PACKAGE_TIME_TZ = timezone(timedelta(hours=8))
 #: 令牌剩余寿命低于这个值（秒）就认为需要刷新，ready() 与 refresh() 用同一个阈值。
@@ -256,8 +247,7 @@ def _normalise_priority(value):
 def normalise_account_note(value):
     """账号备注的取值规则：去空白、限长 100 字。返回 (note, 错误说明)。
 
-    空串是合法取值，表示清除备注；不是字符串或超过上限时返回说明，交给
-    调用方决定是拒绝还是截断。
+    空串表示清除备注；不是字符串或超过上限时返回说明，交给调用方决定。
     """
     if value is None:
         return "", ""
@@ -280,9 +270,8 @@ def _stored_note(value):
 def parse_package_time(value):
     """套餐周期时刻（epoch 秒），用于 CycleStartTime 与 CycleEndTime。
 
-    字段缺失、为空、格式不对都返回 None：周期时间只是展示字段，解析失败不能
-    连累整次余额读取；能解析时必须先贴上 UTC+8 再取时间戳，否则同一份响应在
-    不同时区的机器上得出不同的时刻。
+    字段缺失、为空、格式不对都返回 None，不连累整次余额读取；能解析时必须先
+    贴上 UTC+8 再取时间戳，否则同一份响应在不同时区的机器上得出不同时刻。
     """
     if not isinstance(value, str):
         return None
@@ -300,15 +289,14 @@ class Account(object):
     def __init__(self, data, path=None):
         data = data or {}
         self.path = path
-        # 这份数据带了哪些字段：AccountPool.add() 用它判断一次登录/导入替换
-        # 账号时，哪些面板设置该沿用旧值（登录数据里根本没有那些键）。
+        # 这份数据带了哪些字段：AccountPool.add() 用它判断替换账号时哪些面板
+        # 设置该沿用旧值（登录数据里没有那些键）。
         self.payload_keys = frozenset(data.keys())
         token = str(data.get("accessToken") or "")
         self.uid = str(data.get("uid") or jwt_uid(token))
         # The CN desktop build stores its nickname as an encrypted envelope
-        # ({"$wbEncrypted": ...}) rather than plain text. Stringifying that would
-        # paint an entire dictionary into the account row, so anything that is not
-        # a plain string is dropped and the uid prefix is shown instead.
+        # ({"$wbEncrypted": ...}) rather than plain text; anything that is not a
+        # plain string is dropped and the uid prefix is shown instead.
         raw_nickname = data.get("nickname")
         if isinstance(raw_nickname, str) and "$wbEncrypted" not in raw_nickname:
             self.nickname = raw_nickname.strip()
@@ -320,17 +308,15 @@ class Account(object):
             self.domain = get_realm_config(self.realm)["domain"]
         self.platform = str(data.get("platform") or "CLI")
         # 出站身份读回凭证文件里保存的值：面板手动切换与 429 自动切换都会经由
-        # save() 写进凭证文件（to_dict() 序列化的是当下身份），所以重启后接着用
-        # 上次实际生效的那条通道，而不是每次都回到默认。
-        # 凭证文件没有这个字段、或值不合法时 normalize_product() 会回退到
-        # WorkBuddy 独立桌面端 (workbuddy)，升级前就已存在的账号行为不变。
+        # save() 写入（to_dict() 序列化的是当下身份），重启后接着用上次实际生效
+        # 的那条通道；字段缺失或值不合法时 normalize_product() 回退到 workbuddy。
         self.product = wb_identity.normalize_product(data.get("product"))
         self.enterprise_id = str(data.get("enterpriseId") or "")
         self.access_token = token
         self.refresh_token = str(data.get("refreshToken") or "")
         self.expires_at = normalize_epoch(data.get("expiresAt")) or jwt_exp(token)
-        # 令牌签发时刻：面板的有效期进度按「到期 - 签发」取满格。凭证文件里没有
-        # 这个字段时从令牌自身读，读不到就留 0，面板不画进度条。
+        # 令牌签发时刻：面板的有效期进度按「到期 - 签发」取满格；凭证文件里没有
+        # 这个字段时从令牌自身读, 读不到就留 0。
         self.issued_at = normalize_epoch(data.get("issuedAt") or jwt_iat(token))
         self.added_at = data.get("addedAt") or time.time()
         self.source = str(data.get("source") or "oauth")
@@ -339,61 +325,52 @@ class Account(object):
         # Runtime-resolved value; recomputed by AccountPool.apply_proxy_slots().
         self.proxy = self.proxy_legacy
         self.enabled = data.get("enabled", True)
-        # 调用优先级：一个请求可用的账号里数字最小的先被选中，数字相同则保持
-        # 原来的轮询顺序。默认 100，因此没有调过的账号池行为与以前完全一致。
-        # 会话粘性优先于优先级：一条对话在它绑定的账号还能接单时继续用它。
+        # 调用优先级：数字最小的先被选中, 数字相同保持原轮询顺序; 默认 100,
+        # 没调过的账号池保持默认行为。会话粘性优先于优先级。
         self.priority = _normalise_priority(data.get("priority"))
-        # 面板备注：跟着凭证文件走，重新登录与桌面端导入不会带上它，
+        # 面板备注：跟着凭证文件走, 重新登录与桌面端导入不会带上它,
         # AccountPool.add() 因此把它列进 KEEP_ON_REPLACE_FIELDS。
         self.note = _stored_note(data.get("note"))
         # 单账号单模型的并发上限：0 表示不限。计数在内存里，重启即清空。
         self.concurrency_limit = _stored_concurrency_limit(data.get("concurrencyLimit"))
         self.last_error = str(data.get("lastError") or "")
         self.cooldown_until = float(data.get("cooldownUntil") or 0)
-        # Per-model throttling. Upstream rate limits (code 6004 "usage exceeds
-        # frequency limit") apply to ONE model for one account, not to the whole
-        # account: other models keep working. Cooldown the offending model only,
-        # otherwise a single throttled model blackholes every request on the pool.
+        # Per-model throttling: upstream rate limits (code 6004) apply to ONE
+        # model of ONE account, so cooldown the offending model only - a single
+        # throttled model must not blackhole every request on the pool.
         # Deliberately runtime-only (not persisted): see VOLATILE_FIELDS.
         self.model_cooldowns = {}
         self.credits = data.get("credits") or None
-        # 评分分配用的运行时数据：最近一小时被选中的时刻，以及每天消耗多少积分
-        # （由 wb_proxy 折叠 usage 日志后推下来）。都不写回凭证文件。
+        # 评分分配用的运行时数据：最近一小时被选中的时刻与每天消耗的积分
+        # （由 wb_proxy 折叠 usage 日志后推下来），都不写回凭证文件。
         self._pick_stamps = collections.deque()
         self._pick_lock = threading.Lock()
         self.credit_rate_per_day = 0.0
         self.last_checkin = data.get("lastCheckin") or None
         self.last_daily_chat = data.get("lastDailyChat") or None
-        # Low-credit guard: once the balance reaches this level the account
-        # stops being handed out, so it never drops to zero (a zero balance is
-        # what makes the upstream start sending nagging SMS). Resolved from the
-        # global setting by AccountPool.apply_reserve_credits(); 0 disables it.
+        # Low-credit guard: at this balance the account stops being handed out,
+        # so it never drops to zero and triggers the upstream reminder SMS;
+        # resolved by AccountPool.apply_reserve_credits(); 0 disables it.
         self.reserve_credits = 0
-        # Daily token guard: an account that already burned this many tokens
-        # today stops being handed out, so a client that would burn the rest
-        # of the day's quota rotates to another account instead of hitting
-        # the upstream wall. Resolved from the global setting by
-        # AccountPool.apply_daily_token_limit(); 0 disables it.
-        # daily_tokens_today stays None until the proxy has folded the usage
-        # log at least once, so a fresh process never parks anyone on an
-        # unknown count.
+        # Daily token guard: an account that burned this many tokens today stops
+        # being handed out, so a client rotates instead of hitting the upstream
+        # wall; resolved by AccountPool.apply_daily_token_limit(); 0 disables it.
+        # daily_tokens_today stays None until the proxy folded the usage log once.
         self.daily_token_limit = 0
         self.daily_tokens_today = None
-        # Serialise token refresh and file writes. Request threads, dashboard
-        # polls and the scheduler can all reach refresh()/save() for
-        # the same account at once; without a lock the upstream rotates the
-        # refresh token concurrently and the last writer wins, so a freshly
-        # minted token can be overwritten by a stale snapshot.
+        # Serialise token refresh and file writes: request threads, dashboard
+        # polls and the scheduler can reach refresh()/save() at once, and without
+        # a lock a freshly minted token can be overwritten by a stale snapshot.
         self._refresh_lock = threading.Lock()
         self._save_lock = threading.Lock()
-        # The dashboard snapshots this state while request threads update it.
-        # Keep it separate from _refresh_lock, which spans network requests.
+        # Snapshotted by the dashboard while request threads update it; keep it
+        # separate from _refresh_lock, which spans network requests.
         self._throttle_lock = threading.Lock()
         # 在途请求计数：键是模型名；独立锁，面板读计数时不挡请求线程。
         self._concurrency_lock = threading.Lock()
         self._in_flight = {}
-        # 删除标记：面板删掉账号后，请求线程手里的旧引用还会走到 save()，
-        # 没有这个标记就会把刚删掉的凭证文件重新写出来。
+        # 删除标记：面板删掉账号后, 请求线程手里的旧引用还会走到 save(),
+        # 没有它就会把刚删掉的凭证文件重新写出来。
         self.deleted = False
 
     def to_dict(self):
@@ -441,8 +418,8 @@ class Account(object):
     def credit_expiries(self):
         """套餐到期列表 [{at, amount, name}]，按到期时间升序。
 
-        只收余额大于 0 且解析出到期时刻的套餐：余额为 0 的套餐到期与否不
-        影响任何决策，列出来只会让人误以为还有额度。
+        只收余额大于 0 且解析出到期时刻的套餐, 余额为 0 的套餐列出来只会让人
+        误以为还有额度。
         """
         credits = self.credits if isinstance(self.credits, dict) else {}
         packages = credits.get("packages")
@@ -483,9 +460,8 @@ class Account(object):
     def credit_target_per_day(self, now=None):
         """到期前每天至少要消耗掉的积分；还没查过余额时返回 None。
 
-        对每个到期时刻，把在它之前到期的余额加总后除以离它的天数，取最大值：
-        晚到期的套餐只摊到它自己的期限上。已过期的套餐是旧快照里的残留，
-        不计入。查过余额但没有未到期的套餐时返回 0。
+        对每个到期时刻, 把在它之前到期的余额加总后除以离它的天数, 取最大值;
+        已过期的套餐不计入; 查过余额但没有未到期的套餐时返回 0。
         """
         credits = self.credits if isinstance(self.credits, dict) else {}
         if not isinstance(credits.get("packages"), list):
@@ -554,10 +530,9 @@ class Account(object):
         path = os.path.abspath(os.path.join(directory, name))
         if not path.startswith(os.path.abspath(directory)):
             raise ValueError("invalid path for account save")
-        # A unique temp name plus a per-account lock: two threads saving the
-        # same account used to share "<uid>.json.tmp", so one could truncate
-        # the file the other was still writing and the loser's os.replace()
-        # then failed with ENOENT.
+        # A unique temp name plus a per-account lock: two threads saving the same
+        # account would otherwise share one temp file, and the loser's
+        # os.replace() would fail with ENOENT.
         with self._save_lock:
             if self.deleted:
                 return None
@@ -584,8 +559,8 @@ class Account(object):
     def reserve_blocked(self):
         """True when the low-credit guard should keep this account idle.
 
-        Only a *known* balance can block: an account whose credits were never
-        fetched stays usable, otherwise a fresh install would look empty.
+        Only a *known* balance can block; an account whose credits were never
+        fetched stays usable.
         """
         reserve = int(self.reserve_credits or 0)
         if reserve <= 0:
@@ -605,8 +580,8 @@ class Account(object):
     def daily_limit_blocked(self):
         """True when today's counted usage has reached the configured limit.
 
-        Only a *counted* day can block: until the proxy has folded the usage
-        log once, the count is None and the account stays usable.
+        Only a *counted* day can block: the count is None until the proxy has
+        folded the usage log once.
         """
         try:
             limit = int(self.daily_token_limit or 0)
@@ -645,17 +620,15 @@ class Account(object):
         remaining = exp - time.time()
         if remaining > TOKEN_REFRESH_MARGIN:
             return True
-        # Refresh is a last resort and its result decides availability.
-        # Returning True unconditionally here kept handing out an account
-        # whose token was about to expire, so requests went upstream with a
-        # stale credential and came back 401/403.
+        # Refresh is a last resort and its result decides availability: returning
+        # True here handed out accounts whose stale credential came back 401/403.
         return self.refresh()
 
     def headers(self, purpose="chat"):
         """组出这一轮的出站标头。
 
-        chat 用途走 wb_identity（CLI 头 / WorkBuddy 头，可切换）；
-        billing 用途维持原本的轻量标头，计费端点不吃那套身份。
+        chat 用途走 wb_identity（CLI 头 / WorkBuddy 头, 可切换）; billing 用途
+        维持轻量标头, 计费端点不吃那套身份。
         """
         cfg = get_realm_config(self.realm)
 
@@ -708,10 +681,7 @@ class Account(object):
         return headers
 
     def set_product(self, value):
-        """切换出站身份（cli <-> workbuddy）。返回 True 表示真的换了。
-
-        身份会写回凭证文件，重启后仍然有效。save() 需要目录参数。
-        """
+        """切换出站身份（cli <-> workbuddy）。返回 True 表示真的换了；调用方负责 save() 写回凭证文件。"""
         new = wb_identity.normalize_product(value)
         if new == self.product:
             return False
@@ -815,10 +785,10 @@ class Account(object):
     def daily_chat_web(self, prompt=None):
         """网页通道的每日活跃会话（issue #75 / #59 / #90）。
 
-        只建会话是不够的：agent 要等客户端接上沙箱并请求这一轮才会跑，否则会话
-        永远停在 CREATING、没有任何输出，也就不算一次有效对话（#90 实测）。这里
-        按网页端的顺序走完：建会话 → 取沙箱 link+token → ACP 的 initialize /
-        session/load / session/prompt（见 wb_webagent）→ 轮询到 completed。
+        只建会话不算有效对话: agent 要等客户端接上沙箱并请求这一轮才会跑, 否则
+        会话停在 CREATING、没有任何输出（#90 实测）。按网页端的顺序走完:
+        建会话 → 取沙箱 link+token → ACP 的 initialize / session/load /
+        session/prompt（见 wb_webagent）→ 轮询到 completed。
 
         返回 {"ok": True, "conversation": id, "status": "completed", "chunks": n,
         "elapsed_ms": n}，失败时 {"ok": False, "error": ...}（尽量带上会话 id）。
@@ -898,9 +868,9 @@ class Account(object):
     def daily_chat(self, web=None):
         """国际版每日活跃对话（官方每日活跃 30/50 积分）。
 
-        两步：桌面端身份的轻量对话（一直以来的做法），以及网页通道的会话
-        （issue #75/#59/#90：算数的是「跑完的 agent 会话」）。web=None 时按
-        settings.json 里的 daily_chat_web 决定，True/False 可显式指定。
+        两步：桌面端身份的轻量对话，以及网页通道的会话（issue #75/#59/#90：
+        算数的是「跑完的 agent 会话」）。web=None 时按 settings.json 里的
+        daily_chat_web 决定, True/False 可显式指定。
         """
         if self.realm != "intl":
             return {"ok": False, "error": "daily chat is only for international accounts"}
@@ -962,7 +932,7 @@ class Account(object):
             code = payload.get("code", -1)
             msg = payload.get("msg") or "ok"
             ok = code in (0, 10001)
-            # 只有真的签到成功才记时落盘：失败响应（风控、服务端报错）写进
+            # 只有真的签到成功才记时存盘：失败响应（风控、服务端报错）写进
             # last_checkin 会让这个账号今天再也不会重试。
             if ok:
                 self.last_checkin = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -1132,9 +1102,7 @@ def _claim(account, model, claim):
 def normalise_concurrency_limit(value):
     """Return (limit, error) for the per-account concurrency cap.
 
-    The cap counts in-flight requests per account *and* model, so 0 means
-    unlimited and a hand-edited file cannot smuggle in a negative or absurd
-    number.
+    The cap counts in-flight requests per account and model; 0 means unlimited.
     """
     if isinstance(value, bool) or value is None or (
             isinstance(value, float) and not value.is_integer()):
@@ -1166,10 +1134,9 @@ def _human_delta(seconds):
 # ---------------------------------------------------------------------------
 # 积分变动流水
 #
-# 每次余额读取成功、而合计比上一次已知值增加时追加一行 JSONL：签到、每日活跃、
-# 旅行、套餐到账都会体现在这里。首次读取只建立基线，否则历史余额会被当成刚
-# 刚获得的额度。基线就是凭证文件里的 credits，因此重启后接着比对。
-# 写入目录由 wb_proxy 注入，wb_accounts 不认识 USAGE_DIR。
+# 余额读取成功、而合计比上一次已知值增加时追加一行 JSONL：签到、每日活跃、
+# 旅行、套餐到账都会体现在这里。基线就是凭证文件里的 credits, 因此重启后接着
+# 比对; 首次读取只建立基线。写入目录由 wb_proxy 注入, wb_accounts 不认识 USAGE_DIR。
 # ---------------------------------------------------------------------------
 #: 返回积分流水文件路径的回调；未注入时一次也不记录。
 CREDIT_EVENTS_PROVIDER = None
@@ -1178,8 +1145,8 @@ CREDIT_EVENTS_PROVIDER = None
 def set_credit_events_provider(provider):
     """注入「积分流水写到哪个文件」的来源，传 None 表示不记录。
 
-    注入回调：--usage-dir 可以在启动时改变 USAGE_DIR，
-    测试也会替换它，回调每次重新求值才能一直指向真正在用的目录。
+    注入回调：--usage-dir 可以在启动时改变 USAGE_DIR, 每次重新求值才能一直
+    指向真正在用的目录。
     """
     global CREDIT_EVENTS_PROVIDER
     CREDIT_EVENTS_PROVIDER = provider
@@ -1209,8 +1176,8 @@ _CREDIT_EVENTS_LOCK = threading.Lock()
 def record_credit_event(account, before, after):
     """余额增加时追加一条积分流水，返回这条记录；没有记录时为 None。
 
-    before 为 None 表示还没有基线，只建立基线不记流水。写入失败直接抛出：
-    流水缺行比一次余额读取失败更难发现，不能吞掉。
+    before 为 None 表示还没有基线, 只建立基线不记流水; 写入失败直接抛出,
+    流水缺行比一次余额读取失败更难发现。
     """
     if before is None or after is None or after <= before:
         return None
@@ -1292,17 +1259,16 @@ class SessionAffinity(object):
             return len(self.bindings)
 
 #: 会话归属的打点：面板据此判断「一段对话换了账号」这类缓存损失发生了多少次。
-#: bound_hit = 会话键带着绑定且该账号接单；bound_lost = 有绑定但那个账号当时
-#: 不能接单，重新选了账号；fresh_binding = 会话键第一次出现；no_key = 客户端
-#: 没给会话标识又派不出稳定前缀，只能按算法选。smart_pick / cursor_pick 记录
-#: 两种选号方式各被用过多少次。
+#: bound_hit = 绑定命中且该账号接单; bound_lost = 有绑定但那个账号不能接单;
+#: fresh_binding = 会话键第一次出现; no_key = 客户端没给会话标识;
+#: smart_pick / cursor_pick 记录两种选号方式各被用过多少次。
 ROUTING_COUNTERS = ("bound_hit", "bound_lost", "fresh_binding", "no_key",
                     "smart_pick", "cursor_pick")
 
 
 #: 面板可改、而登录与桌面端导入数据里通常不带的字段（payload 键 -> 属性名）。
-#: AccountPool.add() 用同一个 uid 的新账号替换旧账号时，只有新数据里确实写了
-#: 这个键才覆盖，否则沿用旧值：一次重新登录不该抹掉用户设置的优先级或出站身份。
+#: AccountPool.add() 替换同 uid 账号时, 只有新数据确实写了这个键才覆盖, 否则继承
+#: 旧值：一次重新登录不该抹掉用户设置的优先级或出站身份。
 KEEP_ON_REPLACE_FIELDS = (
     ("product", "product"),
     ("priority", "priority"),
@@ -1325,9 +1291,8 @@ class AccountPool(object):
         self._lock = threading.RLock()
         self._cursor = 0
         self.affinity = SessionAffinity()
-        # 新建绑定用的选号方式：默认保持原来的轮询顺序，只有设置了面板开关
-        # （apply_smart_routing）之后才按评分选号。这样直接构造的账号池
-        # 行为不变，只有走 main() 起服务的实例会用上新算法。
+        # 新建绑定用的选号方式：默认保持轮询顺序, 只有 apply_smart_routing()
+        # 设过面板开关后才按评分选号, 直接构造的账号池行为不变。
         self.smart_routing = False
         self._stats_lock = threading.Lock()
         self.routing_stats = {name: 0 for name in ROUTING_COUNTERS}
@@ -1367,9 +1332,8 @@ class AccountPool(object):
             if existing is not None:
                 account.added_at = existing.added_at
                 account.path = existing.path
-                # 新数据里没写这个键、或写了个 null：沿用旧值。登录（OAuth、
-                # 桌面端凭据）带的数据本来就没有这些字段，显式 null 也不该把
-                # 面板上的设置清掉。
+                # 新数据里没写这个键、或写了个 null：沿用旧值。登录数据本来就没有
+                # 这些字段, 显式 null 也不该把面板上的设置清掉。
                 for key, attr in KEEP_ON_REPLACE_FIELDS:
                     if key in account.payload_keys and getattr(account, attr) is not None:
                         continue
@@ -1507,9 +1471,8 @@ class AccountPool(object):
     def apply_reserve_credits(self, value=None):
         """Re-resolve the low-credit guard for every account.
 
-        Same shape as apply_proxy_slots(): settings.json is the source of
-        truth and the per-account value is derived here, so the request path
-        needs no extra settings lookup.
+        Same shape as apply_proxy_slots(): settings.json is the source of truth
+        and the per-account value is derived here.
         """
         import wb_settings
 
@@ -1527,11 +1490,8 @@ class AccountPool(object):
     def apply_daily_token_limit(self, value=None, usage=None):
         """Re-resolve the daily token guard for every account.
 
-        Same shape as apply_reserve_credits(): settings.json holds the limit,
-        while `usage` (uid -> tokens counted today) comes from the caller,
-        because only the proxy reads the usage log. Passing None keeps the
-        last known counts, so a settings change never turns them into
-        "unknown".
+        `usage` (uid -> tokens counted today) comes from the caller, because only
+        the proxy reads the usage log; passing None keeps the last known counts.
         """
         import wb_settings
 
@@ -1569,9 +1529,8 @@ class AccountPool(object):
         slot_id = str(slot_id or "").strip()
         account.proxy_slot = slot_id
         if not slot_id:
-            # Selecting "direct" must mean direct. A stale legacy URL left in
-            # place kept routing traffic through it, so the panel showed
-            # direct while the account was still proxied.
+            # Selecting "direct" must mean direct: a stale legacy URL would keep
+            # routing traffic through it while the panel shows direct.
             account.proxy_legacy = ""
         account.save(self.dir)
         self.apply_proxy_slots()
@@ -1618,8 +1577,7 @@ class AccountPool(object):
         """Re-resolve the placement setting for this pool.
 
         Same shape as the other guards: settings.json is the source of truth,
-        the pool holds the resolved boolean so the request path needs no
-        settings lookup. Passing None reads the current setting.
+        the pool holds the resolved boolean; passing None reads the current setting.
         """
         import wb_settings
 
@@ -1660,8 +1618,7 @@ class AccountPool(object):
     def unavailable_reason(self, uid, realm=None, model=None):
         """为什么这个账号现在不能接单；可以接单时返回空串。
 
-        测试台可以只用一个账号发请求，拒绝时要说清是这个账号的哪一条限制，
-        套账号池整体的「no usable account」对它没有信息量。
+        测试台可以只用一个账号发请求, 拒绝时要说清是这个账号的哪一条限制。
         """
         account = self.get(uid)
         if account is None:
@@ -1696,17 +1653,16 @@ class AccountPool(object):
                 if (account and account.realm == realm and account.ready(model=model)
                         and _claim(account, model, claim)):
                     # 绑定命中也算一次接单：评分分配按「最近一小时实际接到的
-                    # 份额」判断一个账号忙不忙，漏掉这些请求会把最忙的账号
-                    # 看成最闲的。
+                    # 份额」判断忙闲, 漏掉这些请求会把最忙的账号看成最闲的。
                     account.mark_pick()
                     self.count_routing("bound_hit")
                     return account
-                # 绑定的账号此刻不能接单（冷却、限额、令牌失效、名额满）：换号
-                # 并重新绑定，接手账号重算完整前缀后，缓存就跟着它。
+                # 绑定的账号此刻不能接单（冷却、限额、令牌失效、名额满）：换号并
+                # 重新绑定, 接手账号重算完整前缀后缓存跟着它。
                 return self._rebind(realm, session_key, exclude, model, claim)
             if bound_uid:
-                # 调用方把这个账号排除在外（原地重试用完、正在换号）：这段
-                # 对话同样要落到别的账号上，计数与绑定失效走同一条路。
+                # 调用方把这个账号排除在外（原地重试用完、正在换号）：这段对话
+                # 同样要改由别的账号接手, 与绑定失效走同一条路。
                 return self._rebind(realm, session_key, exclude, model, claim)
             account = self.pick(realm=realm, exclude=exclude, model=model, claim=claim)
             if account:
@@ -1719,8 +1675,7 @@ class AccountPool(object):
     def _rebind(self, realm, session_key, exclude, model, claim=None):
         """换一个账号接手这段对话，并把这次换号记进打点。
 
-        调用方把一个账号排除在外与绑定失效的后果相同：这段对话要落到别的
-        账号上，前端缓存要在新账号上重建一次。
+        调用方排除一个账号与绑定失效的后果相同：这段对话要改由别的账号接手。
         """
         self.affinity.unbind(session_key)
         self.count_routing("bound_lost")
@@ -1742,8 +1697,7 @@ class AccountPool(object):
             start = self._cursor
         total = len(snapshot)
         if total == 0: return None
-        # 优先级数字小的先被选中；数字相同按轮询顺序，因此全是默认值时与以前
-        # 完全一致。ready() 按这个顺序逐个判断，与改动前一样只会给沿途遇到的
+        # 优先级数字小的先被选中, 数字相同按轮询顺序; ready() 只给沿途遇到的
         # 账号做凭证刷新。
         order = sorted(range(total), key=lambda i: (snapshot[i].priority,
                                                     (i - start) % total))
@@ -1760,17 +1714,16 @@ class AccountPool(object):
     def _pick_scored(self, realm=None, exclude=None, model=None, claim=None):
         """按积分到期节奏与最近一小时的忙闲给新对话选号。
 
-        每个账号到期前每天至少要消耗掉的积分是它的义务，义务减去今天的消耗
-        速度是它的欠账。欠账占候选账号欠账总和的比例，就是它应当承担的份额；
-        再减去它最近一小时实际接到的份额，差得最多的先派过去。全员都跟得上
-        时比例为 0，这时退化成「最近一小时最少接单的先派」。
+        每个账号到期前每天至少要消耗掉的积分是它的义务, 义务减去今天的消耗
+        速度是它的欠账; 欠账占候选账号欠账总和的比例就是它应当承担的份额,
+        再减去最近一小时实际接到的份额, 差得最多的先派过去。全员都跟得上时
+        比例为 0, 退化成「最近一小时最少接单的先派」。
 
-        候选账号只包括此刻能接单、又没被调用方排除的账号：拿不到新对话的
-        账号如果算进总和，它的欠账永远消不掉，会把其余账号的份额压平。
+        候选账号只包括此刻能接单、又没被排除的账号: 拿不到新对话的账号若算进
+        总和, 它的欠账永远消不掉, 会把其余账号的份额压平。
 
-        已经在服务的对话不受影响，它们继续用绑定住的账号，前缀缓存不动。
-        ready() 只按这个顺序逐个判断，与轮询选择走同一条路：只有沿途遇到的
-        账号会做凭证刷新。
+        已在服务的对话继续用绑定的账号, 前缀缓存不动; ready() 只给沿途遇到的
+        账号做凭证刷新。
         """
         exclude = exclude or set()
         with self._lock:
@@ -1954,9 +1907,8 @@ class AccountPool(object):
 def desktop_auth_dirs():
     """Directories where the desktop client may keep its *.info credentials.
 
-    Windows uses %LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth.
-    macOS builds of the client keep the same layout under Application
-    Support, so probe the plausible app names there too. Missing
+    Windows uses %LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth; other
+    platforms probe the plausible app names under Application Support. Missing
     directories are harmless: callers only read the files that exist.
     """
     dirs = []
@@ -1976,7 +1928,7 @@ def desktop_auth_dirs():
     return dirs
 
 def desktop_auth_dir():
-    """First candidate credential directory (kept for older callers)."""
+    """First candidate credential directory."""
     return desktop_auth_dirs()[0]
 
 def desktop_credential_candidates():
@@ -1994,9 +1946,8 @@ def desktop_credential_candidates():
 def scan_desktop_credentials():
     """Describe the desktop-app credentials found on this machine.
 
-    Read-only: nothing is added to the pool. The dashboard shows the result
-    and lets the user decide which ones to import, so the proxy never
-    silently adopts the desktop client's login.
+    Read-only: nothing is added to the pool, so the proxy never silently
+    adopts the desktop client's login.
     """
     found = []
     for path, realm in desktop_credential_candidates():
@@ -2043,30 +1994,25 @@ def scan_desktop_credentials():
 #
 # Accounts travel as a single JSON document so a pool can be moved between
 # machines (or backed up) without reaching into the accounts directory by hand.
-# The shape is deliberately close to the per-account files on disk, so an
-# exported document can be read by eye and hand-edited if needed.
-#
-# Two containers are accepted on import:
+# Containers accepted on import:
 #   1. this module's own export  -> {"format": "workbuddy-accounts", "accounts": [...]}
 #   2. a bare list               -> [ {...}, {...} ]           (hand-written)
 #   3. a single account object   -> {...}                       (one-off paste)
-# A desktop-app credential ({"auth": {...}, "account": {...}}) is also accepted,
-# because that is what people usually have lying around.
+# A desktop-app credential ({"auth": {...}, "account": {...}}) is also accepted.
 
 EXPORT_FORMAT = "workbuddy-accounts"
 EXPORT_VERSION = 1
 
-# Fields that describe live state rather than the credential itself. They are
-# exported for inspection but never trusted on import: a stale cooldown or a
-# disabled flag from another machine would silently cripple the target pool.
+# Fields that describe live state rather than the credential itself: exported for
+# inspection but never trusted on import, or a stale cooldown or disabled flag
+# from another machine would silently cripple the target pool.
 VOLATILE_FIELDS = ("cooldownUntil", "lastError", "credits", "lastCheckin", "lastDailyChat")
 
 
 def account_to_export(account):
     """Serialise one account for an export document."""
     data = account.to_dict()
-    # Keep the credential and identity; drop nothing, but mark the file source
-    # so a re-import on the same machine does not look like a desktop import.
+    # to_dict() 已经是导出所需的全部内容；path 是运行时字段, 不进文档。
     data.pop("path", None)
     return data
 
@@ -2074,10 +2020,9 @@ def account_to_export(account):
 def build_export_document(accounts, realm=None, include_secrets=True, uids=None):
     """Wrap accounts in a self-describing export document.
 
-    `uids` narrows the export to specific accounts (a single uid gives a
-    one-account document). It is applied on top of the realm filter, so the
-    caller can ask for "this account" and still get an empty document rather
-    than a wrong one when the uid belongs to the other realm.
+    `uids` narrows the export to specific accounts, applied on top of the realm
+    filter, so asking for "this account" in the wrong realm gives an empty
+    document rather than a wrong one.
     """
     wanted = None
     if uids is not None:
@@ -2115,8 +2060,8 @@ def _coerce_account_rows(blob):
         rows = blob["accounts"]
     elif isinstance(blob, dict):
         # A single account object, or a desktop-app credential
-        # ({"account": {...}, "auth": {...}}). Anything else is a wrong shape
-        # and must be reported rather than silently treated as one account.
+        # ({"account": {...}, "auth": {...}}); anything else is a wrong shape
+        # and must be reported rather than treated as one account.
         looks_like_account = (
             blob.get("accessToken")
             or isinstance(blob.get("auth"), dict)
@@ -2143,9 +2088,8 @@ def _coerce_account_rows(blob):
 def normalise_import_row(row, realm=None):
     """Turn one exported/foreign row into Account kwargs.
 
-    Accepts both the flat account shape and the nested desktop-credential shape
-    so a file from either source imports cleanly. Raises ValueError when the
-    row carries no usable credential.
+    Accepts both the flat account shape and the nested desktop-credential shape.
+    Raises ValueError when the row carries no usable credential.
     """
     auth = row.get("auth") if isinstance(row.get("auth"), dict) else None
     profile = row.get("account") if isinstance(row.get("account"), dict) else None
@@ -2185,17 +2129,16 @@ def normalise_import_row(row, realm=None):
         "lastError": "",
         "cooldownUntil": 0.0,
     }
-    # 优先级随导出的文档一起走，文档里没写就不放进 kwargs：AccountPool.add()
-    # 据此判断该不该覆盖已存在账号的同名字段（面板设置因而不被外来行抹掉）。
+    # 优先级随导出的文档一起走, 文档里没写就不放进 kwargs: AccountPool.add()
+    # 据此判断该不该覆盖已存在账号的同名字段。
     priority = pick("priority")
     if priority is not None:
         kwargs["priority"] = priority
-    # 备注同样是面板设置：导出文档带着它，旧文档或外来行不带时保留原值。
+    # 备注同样是面板设置：导出文档带着它, 外来行不带时保留原值。
     note = pick("note")
     if note is not None:
         kwargs["note"] = _stored_note(note)
-    # 并发上限也是面板设置，与优先级、备注同一个口径：导出文档带着它，
-    # 外来行不带时保留已存的值。
+    # 并发上限与优先级、备注同一个口径：导出文档带着它, 外来行不带时保留已存的值。
     concurrency = pick("concurrencyLimit")
     if concurrency is not None:
         kwargs["concurrencyLimit"] = _stored_concurrency_limit(concurrency)

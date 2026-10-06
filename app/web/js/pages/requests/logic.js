@@ -1,5 +1,4 @@
-// 请求日志页的纯逻辑：筛选状态、查询串组装、行内容与详情字段。
-// 只允许 import core/format.js，任何 UI 模板都放在 requests.js 里，方便在 Node 里直接测试。
+// 请求日志页的纯逻辑：筛选状态、查询串组装、行内容与详情字段；任何 UI 模板都放在 requests.js 里，只允许 import core/format.js，方便在 Node 里直接测试。
 import { fmtCredit, fmtDateTime, fmtLatency, fmtNumber, fmtPercent, realmLabel } from '../../core/format.js';
 
 export const PAGE_SIZES = [20, 50, 100];
@@ -57,13 +56,12 @@ export function defaultFilters(realm = DEFAULT_FILTERS.realm) {
   return { ...DEFAULT_FILTERS, realm: REALM_OPTIONS.some((o) => o.id === realm) ? realm : DEFAULT_FILTERS.realm };
 }
 
-/** 每页条数只接受 20 / 50 / 100，其余值一律回到 20。 */
 export function normalizeLimit(value) {
   const n = Number(value);
   return PAGE_SIZES.includes(n) ? n : PAGE_SIZES[0];
 }
 
-/** 与初始条件一模一样时为 false，「重置」按钮只在这种情况下隐藏。初始条件传 base。 */
+/** 与初始条件完全一致时为 false；「重置」按钮只在这种情况下隐藏。 */
 export function isFiltered(filters, base = DEFAULT_FILTERS) {
   return Object.keys(DEFAULT_FILTERS).some((name) => filters[name] !== base[name]);
 }
@@ -78,7 +76,6 @@ export function withFilter(state, name, value) {
   return { ...state, filters: changeFilter(state.filters, name, value), page: 1 };
 }
 
-/** 改变每页条数同样回到第 1 页。 */
 export function withLimit(state, limit) {
   return { ...state, limit: normalizeLimit(limit), page: 1 };
 }
@@ -211,7 +208,7 @@ export function creditText(row) {
   return { text: fmtCredit(value), title: '本次请求在上游的实际扣费', missing: false };
 }
 
-/** 本次请求实际使用的思考档位；没有该字段的行没有记录（老流水与没有档位的模型）。 */
+/** 本次请求实际使用的思考档位；老流水与没有档位的模型没有记录。 */
 export function effortLabel(row) {
   const value = row ? row.reasoning_effort : '';
   if (value === null || value === undefined) return '';
@@ -267,10 +264,7 @@ export function pageList(page, pages) {
   return out;
 }
 
-/**
- * 详情弹窗里的逐项字段。copy 非空时渲染复制按钮，title 是鼠标悬停时的说明；失败记录多一行错误原因。
- * ctx = { keysById, accountsById }
- */
+/** 详情弹窗里的逐项字段：copy 非空时渲染复制按钮，title 是鼠标悬停时的说明；失败记录多一行错误原因。 */
 export function requestDetail(row, ctx = {}) {
   const keys = ctx.keysById || {};
   const accounts = ctx.accountsById || {};

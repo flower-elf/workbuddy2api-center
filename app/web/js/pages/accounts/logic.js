@@ -1,5 +1,4 @@
-// 账号页的纯逻辑：可用性分档、筛选、排序、分页、积分与有效期的显示口径、请求体组装。
-// 这里只依赖 core/format.js，可以在 Node 里直接测试。
+// 账号页的纯逻辑：可用性分档、筛选、排序、分页、积分与有效期口径；只依赖 core/format.js，可以在 Node 里直接测试。
 
 import { fmtAgo, fmtNumber, toMillis } from '../../core/format.js';
 
@@ -9,7 +8,7 @@ export const PRIORITY_MAX = 9999;
 //: 单账号单模型的并发上限，与服务端 MAX_ACCOUNT_CONCURRENCY 一致。
 export const CONCURRENCY_MAX = 1000;
 
-/** 四个展示分组，顺序即筛选芯片顺序：先正常、再要处理的、然后是等待中的、最后是停用的。 */
+/** 四个展示分组，顺序即筛选芯片顺序：可用、需处理、冷却中、已停用。 */
 export const AVAILABILITY_GROUPS = ['usable', 'attention', 'cooling', 'stopped'];
 
 export const FILTERS = [
@@ -35,7 +34,7 @@ export const PRODUCTS = [
 
 export const IDENTITY_TIP = '出站身份：WB 是 WorkBuddy 独立桌面客户端，VSC 是官方 VSCode 插件，CLI 是官方 CodeBuddy CLI。三者对应不同的出站指纹与配额通道。';
 
-/** 时间戳统一成毫秒，供排序与显示共用。 */
+/** 秒级时间戳归一化：非法或非正数按 0 处理。 */
 function seconds(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
@@ -186,16 +185,13 @@ export function concurrencyOf(account) {
   return Number.isInteger(value) && value > 0 ? value : 0;
 }
 
-/** 正在服务的请求数，用来解释为什么这个账号暂不接单。 */
+/** 正在服务的请求数。 */
 export function activeRequestsOf(account) {
   const value = Number(account && account.activeRequests);
   return Number.isInteger(value) && value > 0 ? value : 0;
 }
 
-/**
- * 并发上限的输入校验：0 或空表示不限，其余必须是正整数。
- * 与服务端 normalise_concurrency_limit 同一口径，本地先拦一道。
- */
+/** 并发上限校验：0 或空表示不限，其余必须是正整数；与服务端 normalise_concurrency_limit 同一口径。 */
 export function parseConcurrencyInput(raw) {
   const text = String(raw == null ? '' : raw).trim();
   if (text === '') return { ok: true, value: 0 };
@@ -245,10 +241,7 @@ export function paginate(items, page, pageSize = PAGE_SIZE) {
   return { page: current, pages, total, items: (items || []).slice(start, start + pageSize) };
 }
 
-/**
- * 空态类型：整个池子没有账号、别的版本有账号而当前版本没有、筛选后为空。
- * 三种情况要说的下一步完全不同，所以分开判。
- */
+/** 空态类型：整个池子没有账号、别的版本有账号而当前版本没有、筛选后为空。 */
 export function emptyKind(allAccounts, visibleAccounts, filteredAccounts) {
   if ((filteredAccounts || []).length) return '';
   if (!(visibleAccounts || []).length) return (allAccounts || []).length ? 'realm' : 'none';
@@ -317,10 +310,7 @@ export function creditExpiryChip(account, now = Date.now()) {
   };
 }
 
-/**
- * 有效期内积分的合计：只统计还没到期的套餐，用完但没过期的套餐仍计入总额，
- * 分母因此反映这部分额度的消耗。套餐明细缺失时回退到服务端的汇总值。
- */
+/** 有效期内积分合计：只统计未到期的套餐，用完但未过期的仍计入总额；套餐明细缺失时回退服务端汇总值。 */
 export function validCredits(account, now = Date.now()) {
   const credits = (account && account.credits) || null;
   if (!credits) return null;
@@ -349,7 +339,7 @@ export function creditBarPct(account, now = Date.now()) {
   return Math.max(0, Math.min(100, (valid.remain / valid.size) * 100));
 }
 
-/** 令牌有效期进度：剩余秒数、进度百分比与色调。进度按这次签发到到期的实际时长取满格，拿不到签发时间就不画进度。 */
+/** 令牌有效期进度：剩余秒数、百分比与色调；进度以签发到到期的实际时长为满格，拿不到签发时间则 pct 为 null。 */
 export function tokenExpiryView(account, now = Date.now()) {
   const ms = toMillis(account && account.expiresAt);
   if (ms === null) {
@@ -370,7 +360,7 @@ function remainText(seconds) {
   return (seconds / 86400).toFixed(1) + ' 天';
 }
 
-/** 优先级输入框的校验。返回组装好的提交值或写给用户的原因。 */
+/** 优先级输入框的校验，返回提交值或写给用户的原因。 */
 export function parsePriorityInput(raw) {
   const text = String(raw == null ? '' : raw).trim();
   const value = text === '' ? Number.NaN : Number(text);
@@ -471,10 +461,7 @@ export function mergeCredits(accounts, results) {
   });
 }
 
-/**
- * 出口分配计划：只为已启用且尚未绑定出口的账号按顺序轮流分配已启用的槽位。
- * 已有绑定的账号保持不变，这里不是重新平衡。
- */
+/** 出口分配计划：只为已启用且未绑定出口的账号轮流分配已启用的槽位，已有绑定的保持不变。 */
 export function autoAssignPlan(accounts, slots) {
   const unbound = (accounts || []).filter((account) => account.enabled && !account.proxySlot);
   if (!unbound.length) return { rows: [], instead: '所有已启用账号都已绑定代理出口，本次没有改动' };

@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """把一条网页端（云 agent）会话真正驱动起来（ACP over streamable HTTP）。
 
-issue #90：POST /console/as/conversations/ 只是**排队**了一条会话。agent 要等
+issue #90：POST /console/as/conversations/ 只是**排队**了一条会话，agent 要等
 客户端接上这条会话的沙箱（GET /console/as/conversations/{id}/session 返回的
-`link`）并且请求这一轮才会跑。网页端就是这么做的：
+`link`）并且请求这一轮才会跑。网页端的顺序：
 
-  1. GET <link>，Accept: text/event-stream —— 服务端返回一条 SSE 流，响应头里
-     带 Acp-Connection-Id；
-  2. POST <link>（带 Acp-Connection-Id、Content-Type: application/json），body 是
-     JSON-RPC 请求：initialize → session/load → session/prompt；
+  1. GET <link>，Accept: text/event-stream —— SSE 流，响应头里带 Acp-Connection-Id；
+  2. POST <link>（带 Acp-Connection-Id），body 是 JSON-RPC 请求：
+     initialize → session/load → session/prompt；
   3. 服务端把 session/update 通知推回 SSE 流里，直到这一轮结束。
 
-只建会话、不接沙箱，会话会永远停在 CREATING 且没有任何输出——#90 抓到的就是
-这个。这里只实现打卡需要的那点协议：不带工具、不接终端、不回调文件系统。
+只建会话、不接沙箱，会话会永远停在 CREATING 且没有任何输出。这里只实现打卡需要
+的那点协议：不带工具、不接终端、不回调文件系统。
 """
 
 import http.client
@@ -167,8 +166,7 @@ def run_turn(link, token, session_id, cwd, prompt, user_agent, poll_status=None,
     """接上沙箱、把这一轮跑完。
 
     poll_status 是调用方给的「这条会话现在什么状态」（查 console API）；看到
-    completed 就算跑完，failed/error 直接停。返回结果里带事件数与输出段数，
-    方便在打卡结果里一眼看出到底跑没跑。
+    completed 就算跑完，failed/error 直接停。返回结果里带事件数与输出段数。
     """
     log = log or (lambda *a, **k: None)
     started = time.time()

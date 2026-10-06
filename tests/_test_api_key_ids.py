@@ -1,14 +1,5 @@
-"""API-key row ids must be unique, or the copy button copies the wrong key.
-
-The panel only ever draws a masked key, so the copy button asks
-`/settings/reveal?id=...` for the clear-text value. That lookup returns the
-first row whose id matches, which meant two rows sharing an id (rows used to
-be identified by their position in the submitted list) made the copy button
-on the second row hand out the first row's key.
-
-These cases pin the fix: ids minted on write are unique, a settings file that
-already holds duplicates is read back with distinct ids, and a reveal by id
-resolves to exactly one row. No network access required.
+"""API-key row ids must be unique, or the copy button copies the wrong key: reveal returns
+the first match, and stored duplicates are disambiguated on read. No network access required.
 """
 
 import json
@@ -51,8 +42,7 @@ check("ids are non-empty", all(ids), ids)
 print()
 print("[2] a new row cannot reuse the id of a row deleted earlier")
 
-# Simulate the original bug: rows 0..2 saved, row 1 deleted, a new row appended
-# at index 1. Position-derived ids handed it the id of the deleted row.
+# 复现按位置取 id 的撞车场景：存 0..2 三行、删第 1 行、再在 index 1 追加新行。
 S.set_api_keys(d, [
     {"id": "k0", "name": "a", "key": "k-a"},
     {"id": "k1", "name": "b", "key": "k-b"},
@@ -97,7 +87,7 @@ check("id of the 123 row resolves to its own key",
 print()
 print("[5] the disambiguated id is what gets persisted")
 
-# A save must not reintroduce the collision the read just repaired.
+# 保存不能把刚修复的重复 id 再写回。
 S.set_api_keys(d2, entries)
 on_disk = json.loads(open(S.settings_path(d2), encoding="utf-8").read())["api_keys"]
 disk_ids = [entry["id"] for entry in on_disk]

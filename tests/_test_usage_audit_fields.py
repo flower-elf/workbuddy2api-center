@@ -1,9 +1,6 @@
-"""每一行请求记录都要带上审计字段 key_id / ip / status / api。
+"""每行请求记录都带审计字段 key_id / ip / status / api，字段在请求开始时固定，迟到的写入仍沿用原值。
 
-流式响应和代跑的多轮请求在客户端请求读完之后才写记录，所以字段必须在请求
-开始时就固定下来并跟着这次请求走：测试用线程内的审计上下文模拟这一段，验证
-迟到写入的记录仍然带着原来的 Key、来源地址与接口名。旧行没有这些字段，读取
-方一律按缺失处理，不允许因此报错。
+用线程内的审计上下文模拟客户端读完之后才写记录的这段间隔；旧行没有这些字段时读取方按缺失处理，不允许报错。
 """
 
 import json
@@ -98,9 +95,9 @@ reset_log()
 proxy.record_usage("m-1", {"total_tokens": 10}, stream=False, elapsed_ms=12,
                    audit={"key_id": "k-1", "ip": "1.2.3.4", "api": "chat", "status": None})
 row = rows()[-1]
-check("key_id 落盘", row.get("key_id") == "k-1", row)
-check("ip 落盘", row.get("ip") == "1.2.3.4", row)
-check("api 落盘", row.get("api") == "chat", row)
+check("key_id 写入", row.get("key_id") == "k-1", row)
+check("ip 写入", row.get("ip") == "1.2.3.4", row)
+check("api 写入", row.get("api") == "chat", row)
 check("成功行状态码是 200", row.get("status") == 200, row)
 
 reset_log()
@@ -117,9 +114,9 @@ reset_log()
 proxy.record_error("m-3", 429, "rate limited", elapsed_ms=5,
                    audit={"key_id": "panel", "ip": "127.0.0.1", "api": "messages"})
 row = rows()[-1]
-check("错误行的 key_id 落盘", row.get("key_id") == "panel", row)
-check("错误行的 ip 落盘", row.get("ip") == "127.0.0.1", row)
-check("错误行的 api 落盘", row.get("api") == "messages", row)
+check("错误行的 key_id 写入", row.get("key_id") == "panel", row)
+check("错误行的 ip 写入", row.get("ip") == "127.0.0.1", row)
+check("错误行的 api 写入", row.get("api") == "messages", row)
 check("错误行保留 HTTP 状态码", row.get("status") == 429, row)
 
 reset_log()

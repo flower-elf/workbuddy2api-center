@@ -1,5 +1,4 @@
-/* 设置页纯逻辑：Messages 路径下拉、测试使用的模型下拉、数字与密码校验、代理槽编辑器的未保存判定、
- * 槽位导入与自动分配、运行信息整理。断言的都是操作员能看见的行为：下拉选中什么、什么时候拒绝、刷新会不会冲掉输入。
+/* 设置页纯逻辑：Messages 路径与模型下拉、数字与密码校验、代理槽编辑器与绑定、运行信息。
  * 运行：node tests/javascript/_test_settings_logic.js
  */
 import assert from 'node:assert/strict';
@@ -23,7 +22,7 @@ assert.deepEqual(picked.map((o) => o.selected), [false, true], '预选的必须�
 assert.ok(picked.every((o) => o.label.includes(o.value)), '选项文字要能认出对应哪条路径');
 assert.deepEqual(logic.messagesFormatOptions('', 'openai-completions').map((o) => o.selected), [true, false]);
 
-// ---- 测试使用的模型：目录 + 存着的值，存着的值不在目录里要补一条并选中
+// ---- 测试使用的模型：目录之外的存值要补一条并预选
 const options = logic.testModelOptions(['glm-5.3', 'deepseek-v4.1-flash'], '');
 assert.equal(options[0].value, '', '首项是「默认」，值必须是空串');
 assert.deepEqual(options.slice(1).map((o) => o.value), ['glm-5.3', 'deepseek-v4.1-flash']);
@@ -63,7 +62,7 @@ for (const bad of ['glm 5.3', 'intl/glm-5.3', '-lead', '.lead', '_lead', 'a'.rep
 }
 assert.equal(logic.validateTestModel(''), '', '清空表示回到默认模型，必须允许保存');
 
-// ---- 数字校验：空值表示不限，非法输入要拦下来
+// ---- 数字校验：空值表示不限
 assert.deepEqual(logic.parseNonNegativeInteger(''), { ok: true, value: 0 });
 assert.deepEqual(logic.parseNonNegativeInteger('0'), { ok: true, value: 0 });
 assert.deepEqual(logic.parseNonNegativeInteger(' 120 '), { ok: true, value: 120 });
@@ -86,7 +85,7 @@ assert.notEqual(logic.validatePasswordChange('admin', 'abc'), '', '新密码短�
 assert.equal(logic.validatePasswordChange('admin', 'abcd'), '');
 assert.equal(logic.validatePasswordChange('admin', 'admin123'), '');
 
-// ---- 代理槽编辑器：有没有未保存的改动决定轮询能不能覆盖
+// ---- 代理槽编辑器：未保存的改动不能被轮询覆盖
 const baseline = [
   { id: 'a', name: '香港', url: 'http://127.0.0.1:17890', enabled: true, bound: 2 },
   { id: 'b', name: '国内', url: 'http://127.0.0.1:17891', enabled: false, bound: 0 },

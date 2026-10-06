@@ -1,6 +1,5 @@
-/* 运行日志页的纯逻辑：筛选、增量合并、统计与文本导出。
- *
- *   node tests/javascript/_test_logs_logic.js
+/* 运行日志页纯逻辑：筛选、增量合并、统计与文本导出。
+ * 运行：node tests/javascript/_test_logs_logic.js
  */
 import assert from 'node:assert/strict';
 
@@ -23,7 +22,7 @@ const filters = (patch = {}) => ({ ...logic.defaultFilters(), ...patch });
   assert.deepEqual(logic.filterLogs(logs, filters({ level: 'DEBUG' })).map((x) => x.id), []);
 }
 
-// ---- 模块筛选 + 关键字搜索：关键字大小写无关，内容、模块、时刻都要能搜到
+// ---- 模块筛选 + 关键字搜索：大小写无关，内容、模块、时刻都能搜到
 {
   const logs = [
     entry(1, 'INFO', 'chat', 'deepseek-v4.1-flash replied'),
@@ -41,7 +40,7 @@ const filters = (patch = {}) => ({ ...logic.defaultFilters(), ...patch });
   assert.deepEqual(logic.filterLogs(logs, filters({ search: '不存在的关键字' })), []);
 }
 
-// ---- 增量合并：按 id 去重、保持旧→新顺序、超过上限丢掉最旧的
+// ---- 增量合并：按 id 去重，保持旧→新顺序，超过上限丢最旧的
 {
   const existing = [entry(1, 'INFO', 'system', 'a'), entry(2, 'INFO', 'system', 'b')];
   assert.deepEqual(logic.mergeLogs(existing, []).map((x) => x.id), [1, 2]);
@@ -59,7 +58,7 @@ const filters = (patch = {}) => ({ ...logic.defaultFilters(), ...patch });
   assert.equal(capped[capped.length - 1].id, logic.LOG_MAX + 5);
 }
 
-// ---- since_id：网关没给 max_id 时用收到的最后一条推算
+// ---- since_id：网关没给 max_id 时用最后一条推算
 {
   assert.equal(logic.nextSinceId([], 7), 7);
   assert.equal(logic.nextSinceId([entry(3, 'INFO', 'system', 'a'), entry(9, 'INFO', 'system', 'b')], 4), 9);
@@ -96,7 +95,7 @@ const filters = (patch = {}) => ({ ...logic.defaultFilters(), ...patch });
   assert.equal(logic.tagClass(undefined), 'tag-system');
 }
 
-// ---- 文本导出：每一行都带时刻、级别与模块，缺失字段有兜底
+// ---- 文本导出：每行带时刻、级别与模块，缺失字段有兜底
 {
   const logs = [
     { id: 1, ts: '2026-10-03 10:00:00', time: '10:00:00', level: 'ERROR', tag: 'chat', msg: 'upstream 502' },
@@ -111,7 +110,7 @@ const filters = (patch = {}) => ({ ...logic.defaultFilters(), ...patch });
   ].join('\n'));
   assert.equal(logic.formatLogText([]), '');
 
-  // 复制与导出只带当前筛选命中的行：关键字过滤后必须排除掉不匹配的记录
+  // 复制与导出只带当前筛选命中的行
   const filtered = logic.filterLogs([
     { id: 1, level: 'INFO', tag: 'chat', msg: 'deepseek ok' },
     { id: 2, level: 'ERROR', tag: 'chat', msg: 'upstream 502' },

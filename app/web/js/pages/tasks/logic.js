@@ -1,5 +1,4 @@
-// 任务页的纯逻辑：调度器文案、成长任务状态、猫猫旅行状态、积分变动记录。
-// 只依赖 core/format.js 与账号页的 logic 模块，可以在 Node 里直接测试。
+// 任务页的纯逻辑：调度器文案、成长任务状态、猫猫旅行状态、积分变动记录；只依赖 core/format.js 与账号页的 logic 模块，可以在 Node 里直接测试。
 
 import { fmtCredit, fmtDateTime, fmtNumber, realmLabel } from '../../core/format.js';
 
@@ -54,7 +53,6 @@ export function travelEtaText(travel, now = Date.now()) {
   return pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
-/** 猫猫日常的状态文案。 */
 export function travelView(travel, now = Date.now()) {
   const tr = travel || {};
   const state = String(tr.state || 'unknown');
@@ -79,7 +77,6 @@ export function travelView(travel, now = Date.now()) {
   return { text: '状态未知', tone: 'muted', desc: '没有读取到猫猫旅行的状态' };
 }
 
-/** 成长任务接口的账号下拉选项。 */
 export function growthAccountOptions(accounts, current) {
   const options = [{ value: 'all', label: '全部国内账号 (批量)' }];
   for (const account of accounts || []) {
@@ -90,7 +87,6 @@ export function growthAccountOptions(accounts, current) {
   return { options, selected };
 }
 
-/** 积分变动记录：变更前后与增量。 */
 export function creditEventRows(events) {
   return (events || []).map((event) => {
     const delta = Number(event.delta) || 0;
@@ -113,7 +109,6 @@ export function creditEventsEmptyText(realm) {
     + '签到、每日活跃打卡与猫猫旅行的奖励到账之后就会出现在这里。';
 }
 
-/** 成长任务列表为空时的说明。 */
 export function growthEmptyText(realm) {
   if (realm !== 'cn') return '成长任务只对国内版账号开放，切换到国内版之后可以在这里批量执行任务并领取积分。';
   return '当前没有读到成长任务。请确认至少有一个可用的国内版账号，然后点右上角的「刷新」重试。';

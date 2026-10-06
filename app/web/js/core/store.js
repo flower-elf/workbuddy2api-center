@@ -1,6 +1,6 @@
 import { getJSON, postJSON } from './api.js';
 
-// 跨页面共享的状态。页面通过 subscribe 监听变化，变化原因写在 reason 里。
+// 跨页面共享的状态；页面用 subscribe 监听变化，变化原因写在 reason 里。
 const state = {
   viewRealm: 'intl',     // 页面正在查看的版本（右上角切换）
   activeRealm: 'intl',   // 网关默认出口：没有绑定版本的 Key 走这一个
@@ -33,7 +33,7 @@ export function setViewRealm(realm) {
   emit('viewRealm');
 }
 
-/** 只刷新网关默认出口，不改动正在查看的版本：在某个版本里做的操作不应把页面带到另一个版本。 */
+/** 只刷新网关默认出口，不改动正在查看的版本。 */
 export async function refreshActiveRealm() {
   const data = await getJSON('/realm');
   if (data.current && data.current !== state.activeRealm) {

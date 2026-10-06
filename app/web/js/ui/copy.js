@@ -24,7 +24,7 @@ export async function copyText(text) {
   return ok;
 }
 
-/** 复制并给出结果提示；text 可以是返回字符串的异步函数（例如先向服务端取 Key 明文）。 */
+/** 复制并给出结果提示；text 可以是返回字符串的异步函数。 */
 export async function copyWithToast(text, label = '已复制到剪贴板') {
   let value;
   try {

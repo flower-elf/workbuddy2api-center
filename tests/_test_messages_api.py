@@ -1,18 +1,6 @@
-"""The Anthropic Messages endpoint (/v1/messages) and the two pipelines.
+"""The Anthropic Messages endpoint (/v1/messages): the request/reply converters, both streaming pipelines and the pipeline the setting selects.
 
-A Messages request is translated down to whatever the settings page selected
-(旧版 openai-completions 或新版 openai-responses) and the reply is translated
-back into Anthropic shapes, so the checks are split by direction:
-
-  * the request converters keep system / tools / tool_result / thinking;
-  * the reply converters rebuild text, thinking and tool_use blocks;
-  * both streaming pipelines emit one message_start .. message_stop sequence
-    and hand the tool input over as valid JSON;
-  * the handler picks the pipeline the setting names and answers errors in the
-    Anthropic envelope instead of the OpenAI one.
-
-Everything runs offline: the upstream is a fake iterable, the handler is a
-stub carrying the real methods.
+Everything runs offline: the upstream is a fake iterable, the handler is a stub carrying the real methods.
 """
 
 import json
@@ -61,7 +49,7 @@ class FakeAccount(object):
     uid = "acct-test"
 
     def release_request(self, model=None):
-        """账号并发名额：真实的 Account 在响应体读完时释放，这个桩不计数。"""
+        """真实的 Account 在响应体读完时释放账号名额，这个桩不计数。"""
 
 
 class ChatChunks(object):

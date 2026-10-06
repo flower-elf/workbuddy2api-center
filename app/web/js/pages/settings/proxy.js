@@ -1,5 +1,4 @@
 // 设置 → 代理槽：槽位增删、测试连通性、自动发现并导入、批量分配给未绑定账号。
-// 编辑器内容放在模块级，离开再回来不会丢；有未保存的改动时表头标记。
 import { html, nothing } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
 import { getJSON, postJSON } from '../../core/api.js';

@@ -1,6 +1,4 @@
-"""调度器: 停止后能立刻重启, 等待可被打断, 手动触发的异常进日志, 整点按 UTC+8。
-
-无网络访问。
+"""调度器: 停止后能立刻重启, 等待可被打断, 手动触发的异常进日志, 整点按 UTC+8; 无网络访问。
 """
 
 import calendar
@@ -47,11 +45,7 @@ class BoomPool(object):
 
 
 class ShiftedClock(object):
-    """time 模块替身: 只有本机时区不同, 用来区分本机时区与固定 UTC+8。
-
-    now 是 UTC 时间戳; localtime() 报告 now + local_offset 的"本机时间",
-    按固定 UTC+8 算的代码走 gmtime()。
-    """
+    """time 模块替身: now 是 UTC 时间戳, localtime() 报告 now + local_offset 的本机时间,按固定 UTC+8 算的代码走 gmtime()。"""
 
     def __init__(self, real, now, local_offset):
         self._real = real
@@ -153,7 +147,7 @@ try:
           sched4.next_run_time == "2026-05-02 01:00:00", sched4.next_run_time)
     clock.set_now(calendar.timegm((2026, 5, 1, 13, 0, 0, 0, 0, 0)))  # CST 21:00:00
     sched4._calc_next_fire()
-    check("正好落在 21:00 整点时报的就是这一小时",
+    check("正好是 21:00 整点时报的就是这一小时",
           sched4.next_run_time == "2026-05-01 21:00:00", sched4.next_run_time)
 finally:
     S.time = S.wb_tasks.time = real_time

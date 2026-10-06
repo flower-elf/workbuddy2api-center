@@ -9,8 +9,7 @@ import { pageHeader, notice, emptyState, loadErrorPage, loadErrorInline, busyCli
 import { accountHeader, accountOptions, buildChatBody, hasCreditRecord, sessionCredit, usageParts } from './playground/logic.js';
 import { streamChat } from './playground/stream.js';
 
-// 测试台页：用面板会话直接调试 /v1/chat/completions，请求会真实消耗账号积分。
-// 流式分片的累积在 playground/logic.js，SSE 解析在 playground/stream.js。
+// 测试台页：用面板会话直接调试 /v1/chat/completions，请求会真实消耗账号积分；流式分片累积在 playground/logic.js，SSE 解析在 playground/stream.js。
 
 let seq = 0;
 
@@ -91,8 +90,7 @@ export function mount(host, ctx) {
       }
       state.accounts = (await response.json()).accounts || [];
       state.accountsError = '';
-      // 选中的账号已经不可用（停用、冷却中）时回到全部账号，免得下一次发送
-      // 直接撞在一条已经过期的选择上
+      // 选中的账号已经不可用（停用、冷却中）时回到全部账号，免得下一次发送撞在一条已经过期的选择上
       if (state.account && !accountOptions(state.accounts).some((o) => o.value === state.account)) {
         state.account = '';
       }
@@ -103,7 +101,6 @@ export function mount(host, ctx) {
     draw();
   }
 
-  /** 页头的「刷新」：当前版本的模型与账号都重新读一遍。 */
   async function load() {
     await Promise.all([loadModels(), loadAccounts()]);
   }
@@ -310,11 +307,7 @@ export function mount(host, ctx) {
     });
   }
 
-  /** 输入过程中不重绘整页：只同步输入框高度与发送按钮的可用状态。
-
-  这一页没有心跳，重绘只在下一次发送或刷新时发生，所以按钮的禁用状态
-  必须在这里跟着输入一起改，否则输入之后按钮一直是灰的。
-  */
+  /** 输入过程中不重绘整页，只同步输入框高度与发送按钮的可用状态：这一页没有心跳，不在这里跟着输入改，按钮会一直是灰的。 */
   function syncComposer() {
     const el = inputRef.value;
     if (el) {

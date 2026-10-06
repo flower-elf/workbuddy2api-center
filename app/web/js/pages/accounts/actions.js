@@ -1,4 +1,4 @@
-// 账号页用到的后端接口。集中在这里，页面与弹窗共用同一套调用与命名。
+// 账号页用到的后端接口，页面与弹窗共用同一套调用与命名。
 
 import { downloadFile, getJSON, postJSON } from '../../core/api.js';
 
@@ -115,10 +115,7 @@ function stamp() {
   return new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
 }
 
-/**
- * 导出账号文件。下载走面板会话，普通链接带不上会话请求头。
- * 传入 uid 时只导出那一个账号，文件名带上账号前缀便于区分。
- */
+/** 导出账号文件；下载走面板会话，普通链接带不上会话请求头。传入 uid 时只导出该账号，文件名带账号前缀便于区分。 */
 export function exportAccounts(uid = '') {
   const query = uid ? '?uid=' + encodeURIComponent(uid) : '';
   const label = uid ? uid.slice(0, 8) + '-' : '';

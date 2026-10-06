@@ -1,14 +1,5 @@
-"""Every account-identifying call must leave through the account's proxy.
-
-The proxy-slot feature only isolates exit IPs if *every* request carrying an
-account's credentials uses the bound proxy. A call that quietly bypasses it
-leaks the host IP alongside that account's identity, which is the exact
-correlation the feature exists to prevent - and it is invisible in normal use,
-because everything still works.
-
-This stubs http_json / urlopen and asserts the proxy argument is threaded
-through, so a future edit that drops it fails here instead of in production.
-No network access required.
+"""Every account-identifying call must leave through the account's proxy: a dropped proxy
+argument leaks the host IP, and stubbed helpers make that fail here. No network access.
 """
 
 import os

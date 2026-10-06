@@ -1,11 +1,4 @@
-"""账号备注：写入凭证文件，导入导出带着走，超过 100 字被拒绝。
-
-备注是纯本地字段，不发给上游，也不参与选号；它的风险全在边界上：长度上限
-被悄悄截断会让人以为存进去了，重新登录或导入旧文档时被清空则是静默丢数据。
-因此这里锁三条：写盘后读得回来、>100 字返回 400 且不写盘、导出/导入与
-重新登录都不会抹掉它。
-
-不联网：只使用临时目录与打桩的请求对象。
+"""账号备注是纯本地字段：写入凭证文件，导入导出带着走，超过 100 字被拒绝；不联网，只用临时目录与打桩的请求对象。
 """
 
 import json
@@ -72,8 +65,6 @@ class NormaliseNoteTests(unittest.TestCase):
 
 
 class NoteStorageTests(unittest.TestCase):
-    """凭证文件往返：存进去、读回来、超长文件按上限截断。"""
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(prefix="wb-note-store-")
         self.addCleanup(self._tmp.cleanup)
@@ -107,7 +98,7 @@ class NoteStorageTests(unittest.TestCase):
 
 
 class NoteExportImportTests(unittest.TestCase):
-    """导出文档带着备注，导入写回；没有备注的文档不抹掉已有备注。"""
+    """没有备注的导入文档不会抹掉已有备注。"""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(prefix="wb-note-import-")

@@ -1,0 +1,116 @@
+name: release
+
+# 发版流程：在 Actions 页面运行本工作流并输入版本号（例如 0.2.0），它会：
+#   1. 运行全部测试套件
+#   2. 更新 app/wb_proxy.py 里的 VERSION 并提交到 main
+#   3. 打上 v<版本号> 标签并创建 Release
+#   4. 构建并推送 GHCR 多架构镜像
+#   5. 构建绿色包并附加到 Release 资源
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号，例如 0.2.0 或 0.2.0-rc.1（不要带 v 前缀）
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+    - name: Validate version
+      id: version
+      env:
+        VERSION_INPUT: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        V="${VERSION_INPUT#v}"
+        if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+          echo "::error::版本号格式无效: ${VERSION_INPUT}（示例: 0.2.0 或 0.2.0-rc.1）"
+          exit 1
+        fi
+        {
+          echo "value=$V"
+          echo "tag=v$V"
+          case "$V" in
+            *-*) echo "prerelease=true" ;;
+            *)   echo "prerelease=false" ;;
+          esac
+        } >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
+    - name: Ensure the tag is free
+      env:
+        TAG: ${{ steps.version.outputs.tag }}
+      run: |
+        if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+          echo "::error::标签 $TAG 已存在，请换一个版本号"
+          exit 1
+        fi
+    - name: Bump VERSION
+      env:
+        VALUE: ${{ steps.version.outputs.value }}
+      run: |
+        set -euo pipefail
+        if [ "$(grep -c '^VERSION = "' app/wb_proxy.py)" != "1" ]; then
+          echo "::error::app/wb_proxy.py 里的 VERSION 定义不是恰好一处"
+          exit 1
+        fi
+        sed -i "s/^VERSION = \"[^\"]*\"/VERSION = \"$VALUE\"/" app/wb_proxy.py
+        grep -n '^VERSION = "' app/wb_proxy.py
+    - name: Commit, tag and publish
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ steps.version.outputs.tag }}
+        VALUE: ${{ steps.version.outputs.value }}
+        PRERELEASE: ${{ steps.version.outputs.prerelease }}
+      run: |
+        set -euo pipefail
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add app/wb_proxy.py
+        if git diff --cached --quiet; then
+          echo "app/wb_proxy.py 的 VERSION 已经是 $VALUE，按当前 main 打标签"
+        else
+          git commit -m "release: $TAG"
+          git push origin HEAD:main
+        fi
+        git tag -a "$TAG" -m "$TAG"
+        git push origin "$TAG"
+        if [ "$PRERELEASE" = "true" ]; then
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --prerelease
+        else
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+        fi
+
+  publish-image:
+    needs: release
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+
+  package:
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/package.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}

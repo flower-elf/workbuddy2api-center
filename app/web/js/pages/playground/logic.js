@@ -1,5 +1,4 @@
-// 测试台（playground）的纯逻辑：请求体组装、流式分片累积、用量行的文字。
-// 不碰网络与 DOM，只依赖 core/format.js 与账号页的可用性判定，可以在 Node 里直接测试。
+// 测试台（playground）的纯逻辑：请求体组装、流式分片累积、用量行的文字；不碰网络与 DOM，只依赖 core/format.js 与账号页的可用性判定，可以在 Node 里直接测试。
 import { compareText, fmtCredit, fmtLatency, fmtNumber } from '../../core/format.js';
 import { availabilityTier } from '../accounts/logic.js';
 
@@ -36,7 +35,7 @@ export function cleanErrorMessage(text) {
   return flat.length > 300 ? flat.slice(0, 297) + '...' : flat;
 }
 
-/** 非 2xx 响应体的错误说明；parsed 是已经解析过的 JSON 或原始文本。 */
+/** 非 2xx 响应体的错误说明。 */
 export function responseError(status, parsed) {
   let message = '';
   if (parsed && typeof parsed === 'object') {
@@ -51,7 +50,7 @@ export function responseError(status, parsed) {
   return status ? `请求失败，HTTP ${status}` : '请求失败';
 }
 
-/** 流里带回来的错误对象；没有错误时返回空串。 */
+/** 流里带回来的错误对象。 */
 export function chunkError(chunk) {
   if (!chunk || typeof chunk !== 'object' || !chunk.error) return '';
   const raw = typeof chunk.error === 'string' ? chunk.error : chunk.error.message;
@@ -78,10 +77,7 @@ function usageIsEmpty(usage) {
   return !usage.total && !usage.prompt && !usage.completion && !usage.credit;
 }
 
-/**
- * 累积一个流式分片。chunk 是解析后的 JSON 对象，或字符串 "[DONE]"。
- * 返回新的回答状态，不修改传入的对象。
- */
+/** 累积一个流式分片，返回新的回答状态，不修改传入的对象。 */
 export function applyChunk(answer, chunk) {
   if (chunk === null || chunk === undefined) return answer;
   if (typeof chunk === 'string') {
@@ -135,8 +131,8 @@ export function hasCreditRecord(messages) {
 }
 
 /**
- * 账号下拉的选项。空值表示全部账号，由网关按调度规则挑选；其余只列当前
- * 可用档位的账号，选中的账号这次调试只服务这一个请求。
+ * 账号下拉的选项：空值表示全部账号，其余只列当前可用档位的账号；
+ * 选中的账号这次调试只服务这一个请求。
  */
 export function accountOptions(accounts, now = Date.now()) {
   return (Array.isArray(accounts) ? accounts : [])

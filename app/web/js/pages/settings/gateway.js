@@ -1,5 +1,4 @@
-// 设置 → 网关行为：保留积分、每日限额、自动切换、打卡通道、本地网络工具、
-// Messages 翻译路径与测试使用的模型。控件先改本地草稿，由卡片上的「保存」统一提交。
+// 设置 → 网关行为：保留积分、每日限额、自动切换、打卡通道、本地网络工具、Messages 翻译路径与测试使用的模型；控件先改本地草稿，由卡片上的「保存」统一提交。
 import { html, live, nothing, repeat } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
 import { getJSON } from '../../core/api.js';
@@ -35,7 +34,6 @@ export function createGatewayTab(page) {
   let catalogs = { intl: [], cn: [] };
   let catalogError = '';
 
-  /** 服务端设置视图整理成一份控件状态。 */
   function stateOf(view) {
     return {
       reserve: String(Number(view.reserve_credits) || 0),
@@ -71,7 +69,7 @@ export function createGatewayTab(page) {
     dirtyShown = false;
   }
 
-  /** 服务端设置回写：换标签或重新进入时用服务端的值填满控件。 */
+  /** 用服务端的值填满控件，换标签或重新进入时调用。 */
   function seed(view) {
     baseline = stateOf(view);
     applyState(baseline);

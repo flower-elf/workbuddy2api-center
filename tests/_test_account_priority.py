@@ -1,17 +1,4 @@
-"""Account call priority decides the order the pool hands accounts out.
-
-An account file may carry `priority` (lower number = tried first). These cases
-pin the stored defaults and clamping, the pick order (ties keep the pre-upgrade
-rotation), the skip rules for a cooling or disabled account, the credential-file
-round-trip of `priority`, and the /accounts/set parser. Session affinity is
-pinned too: a conversation keeps the account it started on while that account
-can still serve, even when a lower-numbered account is idle. The debug pin the
-dashboard sends as X-Debug-Account is covered as well: the named account serves
-the request alone, a failure does not fall back to another account, and a client
-with an API key cannot use the header at all.
-
-No network: accounts are built from dicts with plain (non-JWT) tokens, and the
-only files touched are inside temp directories.
+"""Account call priority 决定选号顺序：数字小的先试，数字相同按原有轮转顺序；不联网，账号用普通令牌由字典构造，只写临时目录。
 """
 
 import json
@@ -34,7 +21,7 @@ PRIORITY_ERROR = "priority must be a whole number between 0 and 9999"
 
 
 def account(uid, realm="intl", **fields):
-    """One ready-to-serve account; the plain token keeps jwt_exp() at 0."""
+    """The plain token keeps jwt_exp() at 0."""
     data = {"uid": uid, "accessToken": "t", "realm": realm}
     data.update(fields)
     return wb_accounts.Account(data)
@@ -48,13 +35,10 @@ def pool_with(*accounts):
 
 
 def picked_uids(pool, count, **kwargs):
-    """The uids of `count` consecutive picks."""
     return [pool.pick(**kwargs).uid for _ in range(count)]
 
 
 class PriorityStorageTests(unittest.TestCase):
-    """Default, clamping and the credential-file round-trip."""
-
     def test_missing_or_unusable_priority_reads_as_the_default(self):
         self.assertEqual(wb_accounts.DEFAULT_ACCOUNT_PRIORITY, 100)
         cases = [
@@ -67,8 +51,7 @@ class PriorityStorageTests(unittest.TestCase):
             with self.subTest(case=label):
                 got = account("uid-a", **fields).priority
                 self.assertEqual(got, 100, "%s normalised to %r" % (label, got))
-        # A numeric string is parsed, not rejected: int("50") == 50, so a
-        # hand-edited file holding "50" means priority 50.
+        # 数字字符串按数字解析：手改文件里的 "50" 就是 50。
         self.assertEqual(account("uid-b", priority="50").priority, 50)
 
     def test_out_of_range_values_are_clamped(self):
@@ -92,15 +75,13 @@ class PriorityStorageTests(unittest.TestCase):
 
 
 class PickOrderTests(unittest.TestCase):
-    """Lower numbers are preferred; equal numbers keep the old rotation."""
+    """Lower numbers are preferred; equal numbers keep the rotation order."""
 
     def test_the_lowest_number_takes_every_pick_while_it_can_serve(self):
         pool = pool_with(account("uid-200", priority=200),
                          account("uid-50", priority=50),
                          account("uid-100", priority=100))
-        # Priority is a strict preference, not a rotation: the account list
-        # order (200, 50, 100) must not leak through, and the best account
-        # keeps serving until it fails.
+        # 优先级是严格顺序：列表顺序不影响选号，最优账号持续服务直到失败。
         self.assertEqual(picked_uids(pool, 3, realm="intl"),
                          ["uid-50", "uid-50", "uid-50"])
 
@@ -108,8 +89,7 @@ class PickOrderTests(unittest.TestCase):
         pool = pool_with(account("uid-200", priority=200),
                          account("uid-50", priority=50),
                          account("uid-100", priority=100))
-        # Same walk open_upstream makes while retrying: each attempt adds the
-        # failed account to `exclude`, so the numbers decide who is next.
+        # open_upstream 重试时把失败账号加入 exclude，由数字决定下一个。
         self.assertEqual(pool.pick(realm="intl", exclude={"uid-50"}).uid,
                          "uid-100")
         self.assertEqual(pool.pick(realm="intl",
@@ -130,8 +110,6 @@ class PickOrderTests(unittest.TestCase):
 
 
 class SkipUnavailableTests(unittest.TestCase):
-    """A cooling or disabled account is passed over for the next number."""
-
     def test_a_cooling_account_is_skipped(self):
         cooling = account("uid-cooling", priority=50)
         cooling.note_error("boom", cooldown=60)
@@ -152,8 +130,6 @@ class SkipUnavailableTests(unittest.TestCase):
 
 
 class PersistenceTests(unittest.TestCase):
-    """set_priority writes the credential file a reload reads back."""
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(prefix="wb-priority-set-")
         self.directory = self._tmp.name
@@ -196,17 +172,15 @@ class SessionAffinityTests(unittest.TestCase):
         self.pool = pool_with(self.small, self.big)
 
     def _bind_to_big(self):
-        # Passing over the lower-numbered account once makes the first pick
-        # bind the session to the higher-numbered one.
+        # 跳过数字更小的账号一次，首轮就把会话绑到数字较大的账号。
         bound = self.pool.pick_for_session(realm="intl", session_key="s1",
                                            exclude={"uid-small"})
         self.assertEqual(bound.uid, "uid-big")
 
     def test_the_bound_session_keeps_its_account(self):
         self._bind_to_big()
-        # The lower-numbered account is idle and would win a plain pick ...
+        # 更优账号空闲时普通 pick 会选它，但会话仍留在绑定的账号上。
         self.assertEqual(self.pool.pick(realm="intl").uid, "uid-small")
-        # ... but the session stays with the account it was bound to.
         again = self.pool.pick_for_session(realm="intl", session_key="s1")
         self.assertEqual(again.uid, "uid-big")
 
@@ -227,7 +201,7 @@ class UnavailableReasonTests(unittest.TestCase):
     def test_each_restriction_names_itself(self):
         cooling = account("uid-cooling")
         cooling.note_error("boom", cooldown=60)
-        # 保留积分与日限额由 apply_* 从设置里下推到账号上，这里直接写进内存
+        # 保留积分与日限额平时由 apply_* 从设置下推，这里直接写成账号字段。
         reserved = account("uid-reserve")
         reserved.reserve_credits = 100
         reserved.credits = {"remain": 50, "size": 200}
@@ -347,7 +321,7 @@ class DebugAccountHeaderTests(unittest.TestCase):
 
 
 class ParsePriorityTests(unittest.TestCase):
-    """/accounts/set accepts a whole number in 0..9999 and nothing else."""
+    """/accounts/set 只收 0..9999 的整数。"""
 
     def test_whole_numbers_in_range_pass(self):
         for value in (0, 100, 9999):
@@ -380,7 +354,7 @@ class ParseConcurrencyTests(unittest.TestCase):
                 got, problem = wb_accounts.normalise_concurrency_limit(value)
                 self.assertIsNone(got)
                 self.assertEqual(problem, expected)
-        # 非整数与布尔值一律不算数，错误文案统一（与优先级同一个口径）。
+        # 非整数与布尔值一律拒绝，错误文案与优先级同口径。
         for value in (True, False, 1.5, None, "abc"):
             with self.subTest(value=value):
                 got, problem = wb_accounts.normalise_concurrency_limit(value)

@@ -25,7 +25,7 @@ class ReserveCreditsTests(unittest.TestCase):
             self.assertEqual(wb_settings.reserve_credits(directory), 0)
             self.assertEqual(wb_settings.set_reserve_credits(directory, 10), 10)
             self.assertEqual(wb_settings.reserve_credits(directory), 10)
-            # Garbage and negatives collapse to "off" instead of raising.
+            # 垃圾值与负数都收成 0,不报错
             self.assertEqual(wb_settings.set_reserve_credits(directory, -5), 0)
             self.assertEqual(wb_settings.set_reserve_credits(directory, "abc"), 0)
 
@@ -47,7 +47,7 @@ class ReserveCreditsTests(unittest.TestCase):
 
     def test_guard_off_and_unknown_balance_stay_usable(self):
         off = make_account("uid-off", 1)
-        self.assertFalse(off.reserve_blocked())  # reserve 0 disables the guard
+        self.assertFalse(off.reserve_blocked())  # reserve_credits 为 0 时守卫关闭
         self.assertTrue(off.ready())
 
         unknown = wb_accounts.Account({"uid": "uid-unknown", "accessToken": "t"})

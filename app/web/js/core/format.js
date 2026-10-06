@@ -1,4 +1,4 @@
-// 数字与时间的显示格式。全部是纯函数，可以直接在 Node 里测试。
+// 数字与时间的显示格式，全部是纯函数，可以直接在 Node 里测试。
 
 /** 秒或毫秒时间戳统一成毫秒；无效值返回 null。 */
 export function toMillis(ts) {
@@ -95,7 +95,7 @@ export function fmtAgo(ts, now = Date.now()) {
   return Math.floor(diff / 86400) + ' 天前';
 }
 
-/** 未来时刻 → 「3 天后」「5 小时后」「12 分钟后」；已过去返回「已到期」。 */
+/** 未来时刻 → 「3 天后」「5 小时后」「12 分钟后」，已过去返回「已到期」。 */
 export function fmtUntil(ts, now = Date.now()) {
   const ms = toMillis(ts);
   if (ms === null) return '—';
@@ -133,7 +133,7 @@ export function barColor(pct) {
   return 'var(--danger)';
 }
 
-/** 名称与编号排序用固定按中文习惯的比较器，不跟随运行环境的语言设置。 */
+/** 排序比较器固定按中文习惯，不跟随运行环境的语言设置。 */
 const nameCollator = new Intl.Collator('zh-CN');
 
 export function compareText(a, b) {

@@ -1,13 +1,5 @@
-"""积分套餐的周期时刻解析与透出（CycleStartTime / CycleEndTime）。
-
-两种出错方式都是静默的：时区认错时界面照样显示一个正常的倒计时，字段名认错
-时倒计时永远不出现，两种都要靠对账才发现。参考项目 workbuddy-manager 的
-server/tests/test_credit_expiry.py 用同一批判据锁住了口径，这里把网关的取数
-路径也锁住：周期时刻只认 CycleStartTime 与 CycleEndTime，解析必须先贴 UTC+8
-再取时间戳，credits.packages[].expireAt 与 public() 的 creditExpiries 出自
-同一次读取。
-
-不联网：fetch_credits() 打桩 http_json，只校验解析、持久化与视图。
+"""积分套餐周期时刻：只认 CycleStartTime / CycleEndTime，按 UTC+8 解析后取时间戳；credits.packages[].expireAt
+与 public() 的 creditExpiries 出自同一次读取。不联网，fetch_credits() 打桩 http_json。
 """
 
 import json
@@ -61,8 +53,6 @@ def billing(accounts):
 
 
 class PackageTimeParseTests(unittest.TestCase):
-    """CycleStartTime 与 CycleEndTime 转成绝对时刻。"""
-
     def test_parses_utc8_wallclock(self):
         got = A.parse_package_time("2026-09-20 12:00:00")
         self.assertEqual(got, int(datetime(2026, 9, 20, 12, 0, tzinfo=_CN).timestamp()))
@@ -70,12 +60,7 @@ class PackageTimeParseTests(unittest.TestCase):
                          "04:00")
 
     def test_naive_datetime_never_reaches_timestamp(self):
-        """堵住「朴素 datetime 直接取时间戳」这条路。
-
-        朴素 datetime 的 .timestamp() 按本机时区解释，同一份上游响应在 UTC 容器
-        上会得出与 UTC+8 机器不同的到期时刻，而界面看不出差别。守卫在实现退回
-        朴素取值时立刻报错。
-        """
+        """朴素 datetime 的 .timestamp() 按本机时区解释，UTC 容器会得出不同的到期时刻，守卫必须拦住。"""
         class _Guarded(datetime):
             def timestamp(self):
                 if self.tzinfo is None:

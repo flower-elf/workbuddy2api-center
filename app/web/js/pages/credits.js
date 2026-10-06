@@ -1,5 +1,5 @@
-// 积分页：按账号查看积分的构成，套餐按来源归并、可以逐笔展开。
-// 打开本页时距离上次读取超过设置的间隔才重新读取，停留期间不做定时刷新。
+// 积分页：按账号查看积分构成，套餐按来源归并、可以逐笔展开。
+// 距离上次读取超过设置的间隔才重新读取，停留期间不做定时刷新。
 import { html, nothing, render } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { getJSON } from '../core/api.js';

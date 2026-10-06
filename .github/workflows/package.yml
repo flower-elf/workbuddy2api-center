@@ -1,0 +1,54 @@
+name: package
+
+# 绿色包：内置 Windows Python 运行时的整包 zip。触发方式：
+#   - Release 发布时自动构建并附加到 Release 资源
+#   - release.yml 流水线调用
+#   - 手动运行（只上传为 Actions 运行产物，不附加到 Release）
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要打包的标签（例如 v0.2.0，必须已存在）
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  green-package:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.tag || github.event.release.tag_name }}
+        fetch-depth: 0
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Resolve version
+      id: version
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      run: echo "value=${TAG#v}" >> "$GITHUB_OUTPUT"
+    - name: Build green package
+      run: python tools/_build_green_package.py --version "${{ steps.version.outputs.value }}" --out dist
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wb-proxy-center-v${{ steps.version.outputs.value }}
+        path: dist/*.zip
+    - name: Attach to release
+      if: github.event_name == 'release' || github.event_name == 'workflow_call'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      run: gh release upload "$TAG" dist/*.zip --clobber

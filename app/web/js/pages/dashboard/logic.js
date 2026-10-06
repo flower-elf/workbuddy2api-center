@@ -1,5 +1,4 @@
-// 仪表盘的纯计算：账号按查看版本筛选、可用性分档、积分与到期汇总、健康快照挑选、出口密钥计数。
-// 只依赖 core/format.js 与账号页的积分比例函数，方便在 Node 里直接测试。
+// 仪表盘的纯计算：账号筛选、可用性分档、积分与到期汇总、健康快照与出口密钥计数；只依赖 core/format.js 与账号页的积分函数。
 
 import { barColor, compareText, fmtNumber, fmtCredit, fmtDate } from '../../core/format.js';
 import { creditBarPct, validCredits } from '../accounts/logic.js';
@@ -34,10 +33,7 @@ export function isReady(account, now) {
     && !account.dailyLimitBlocked;
 }
 
-/**
- * 可用性分档，顺序即优先级：已停用、令牌过期、当日额度已满、低于保留积分、冷却中、上次调用失败、可用。
- * tone 直接给 badge 用。
- */
+/** 可用性分档，顺序即优先级：已停用、令牌过期、当日额度已满、低于保留积分、冷却中、上次调用失败、可用。 */
 export function availability(account, now) {
   if (!account.enabled) return { label: '已停用', tone: 'muted' };
   if (isExpired(account, now)) return { label: '令牌过期', tone: 'danger' };
@@ -88,10 +84,7 @@ export function creditsSummary(accounts, now = Date.now()) {
   return { total, known, low, reserve };
 }
 
-/**
- * 一个账号的积分到期明细，按到期时刻升序。
- * 先读后端算好的 creditExpiries，读不到时退回首笔套餐的 expireAt，后端还没上线也能显示。
- */
+/** 一个账号的积分到期明细，按到期时刻升序；优先用后端算好的 creditExpiries，读不到时从套餐的 expireAt 推导。 */
 export function accountExpiries(account) {
   const direct = account && account.creditExpiries;
   if (Array.isArray(direct) && direct.length) {
@@ -140,10 +133,7 @@ function snapshotRank(account, now) {
   return 3;
 }
 
-/**
- * 健康快照要展示的账号：需要处理的排前面，其余按令牌剩余时间从少到多，
- * 最多 limit 个。排序完全确定，同一份数据两次渲染顺序一致。
- */
+/** 健康快照展示的账号：需处理的在前，其余按令牌剩余时间升序，最多 limit 个；同一份数据渲染顺序一致。 */
 export function snapshotAccounts(accounts, limit = 9, now = Date.now()) {
   return [...(accounts || [])]
     .sort((a, b) => {
@@ -212,7 +202,7 @@ export function keyEffect(keys, activeRealm) {
   return { bound, follow, total: bound + follow };
 }
 
-/** 趋势窗口的合计：请求次数、失败次数与 Token 消耗，供卡片右上角一行文字使用。 */
+/** 趋势窗口的合计：请求次数、失败次数与 Token 消耗。 */
 export function trendSummary(buckets) {
   const list = buckets || [];
   const sum = (key) => list.reduce((acc, b) => acc + (Number(b[key]) || 0), 0);

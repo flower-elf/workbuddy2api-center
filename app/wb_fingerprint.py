@@ -1,18 +1,14 @@
-"""wb_fingerprint.py —— 统一设备指纹稳定派生模块 (derive_id)
+"""wb_fingerprint.py —— 设备指纹稳定派生模块 (derive_id)
 
-无论是国内版 (copilot.tencent.com / codebuddy.cn) 还是国际版 (www.workbuddy.ai)，
-均通过本模块基于账号 UID 和加盐哈希单向派生出固定的伪物理设备特征 (machineId, sessionId, reqId)，
-确保每个账号永远来自一台固定的物理设备，且多账号之间天然隔离防风控关联。
+基于账号 UID 与加盐哈希派生固定的伪设备特征 (machineId, sessionId, reqId)：
+同一账号每次都来自同一台设备，多账号之间互相隔离，避免上游风控关联。
 """
 import hashlib
 import time
 
 
 def derive_id(uid: str, salt: str) -> str:
-    """由 uid + salt 稳定派生一个 32 位十六进制设备/会话标识。
-
-    幂等：同一账号每次调用产生相同值，彻底避免随机机器码导致的上游风控。
-    """
+    """由 uid 与 salt 稳定派生 32 位十六进制设备/会话标识；同一账号每次结果相同，避免随机机器码触发上游风控。"""
     seed = f"{salt}:{uid or 'anonymous'}"
     return hashlib.md5(seed.encode("utf-8")).hexdigest()[:32]
 

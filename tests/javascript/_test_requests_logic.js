@@ -1,7 +1,5 @@
-/* 请求日志页的纯逻辑：筛选状态、查询串、状态分档、详情字段。
- *
- *   node tests/javascript/_test_requests_logic.js
- */
+/* 请求日志页纯逻辑：筛选状态、查询串、状态分档、详情字段。
+ * node tests/javascript/_test_requests_logic.js */
 import assert from 'node:assert/strict';
 
 const logic = await import('../../app/web/js/pages/requests/logic.js');
@@ -16,7 +14,7 @@ const state = (filters = {}, extra = {}) => ({
   ...extra,
 });
 
-// ---- 默认筛选：只看最近 7 天，但显式下发 realm=all，否则网关只回默认出口的记录
+// ---- 默认筛选：显式下发 realm=all，否则网关只回默认出口的记录
 {
   const query = logic.buildRecentQuery(state(), NOW);
   const p = params(query);
@@ -66,7 +64,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.equal(bogus.get('realm'), 'all', '取值不在登记表里时退回全部');
 }
 
-// ---- 任一筛选变化回到第 1 页；页码被夹在有效范围内
+// ---- 筛选变化与页码
 {
   const started = state({ realm: 'cn' }, { page: 7, pages: 9 });
   const changed = logic.withFilter(started, 'status', 'fail');
@@ -87,7 +85,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.throws(() => logic.changeFilter(logic.defaultFilters(), 'days', '1'), /unknown filter/);
 }
 
-// ---- 是否处于筛选状态：默认值不算，任一项变化都算
+// ---- 是否处于筛选状态
 {
   assert.equal(logic.isFiltered(logic.defaultFilters()), false);
   assert.equal(logic.isFiltered({ ...logic.defaultFilters(), range: 'all' }), true);
@@ -107,7 +105,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.equal(params(logic.buildRecentQuery({ filters: base, page: 1 }, NOW)).get('realm'), 'cn');
 }
 
-// ---- 选项列表刷新后清掉已经不存在的筛选值
+// ---- 刷新后清掉失效的筛选值
 {
   const current = logic.defaultFilters();
   const dropped = logic.pruneFilters({ ...current, key: 'gone', account: 'uid-gone' }, { keyIds: ['k1'], accountIds: ['uid-intl-a'] });
@@ -128,7 +126,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.equal(logic.statusInfo({ status: 502 }).tone, 'danger');
   assert.equal(logic.statusInfo({ status: 302 }).tone, 'danger', '3xx 不属于成功也不属于用户错误');
 
-  // 旧记录没有状态码，按 outcome 推算，但显示结果文字而不是编造的数字
+  // 旧记录缺状态码时按 outcome 推算并显示结果文字
   assert.deepEqual(logic.statusInfo({ outcome: 'completed' }), { code: 200, tone: 'success', text: '完成', title: '旧记录没有状态码，按成功归档' });
   assert.equal(logic.statusInfo({ outcome: 'client_aborted' }).tone, 'warning');
   assert.equal(logic.statusInfo({ outcome: 'upstream_aborted' }).tone, 'danger');
@@ -142,7 +140,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.equal(logic.rowOutcome({ outcome: 'client_aborted', error: 'x' }), 'client_aborted');
 }
 
-// ---- 密钥显示名：网关解析的 key_name 优先，其次当前密钥列表，最后固定说明
+// ---- 密钥显示名：key_name 优先，其次密钥列表与固定说明
 {
   const keys = { k1: { id: 'k1', name: '客服组' } };
   assert.equal(logic.keyLabel({ key_id: 'k1', key_name: '客服组' }, keys), '客服组');
@@ -186,7 +184,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.equal(logic.creditText({ credit: 'x' }).missing, true);
 }
 
-// ---- 思考档位：只有流水里带该字段的行才有值，老行与没有档位的模型都空着
+// ---- 思考档位：只有带该字段的行才有值
 {
   assert.equal(logic.effortLabel({ reasoning_effort: 'high' }), 'high');
   assert.equal(logic.effortLabel({ reasoning_effort: ' none ' }), 'none', '去掉首尾空格');
@@ -204,7 +202,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.equal(logic.rowTimestamp({}), null);
 }
 
-// ---- 页码列表：总数不超过 7 时全部列出，否则首尾固定并省略中间
+// ---- 页码列表：超过 7 页时省略中间
 {
   assert.deepEqual(logic.pageList(1, 1), [1]);
   assert.deepEqual(logic.pageList(1, 7), [1, 2, 3, 4, 5, 6, 7]);
@@ -214,7 +212,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.deepEqual(logic.pageList(99, 3), [1, 2, 3], '超出范围的页码退回最后一页');
 }
 
-// ---- 详情弹窗字段：每一项都在，缺少的字段有明确说明，只有失败记录才有错误行
+// ---- 详情弹窗字段：缺项有说明，失败记录另有错误行
 {
   const row = {
     at: 1700000000, iso: '2026-10-03T01:02:03', api: 'chat', realm: 'intl', model: 'deepseek-v4.1-flash',
@@ -270,7 +268,7 @@ const state = (filters = {}, extra = {}) => ({
   assert.equal(legacy['积分消耗'], '—');
 }
 
-// ---- 接口名称：认识的接口翻成中文，不认识的照原样显示
+// ---- 接口名称：认识的翻成中文，其余原样显示
 {
   assert.equal(logic.apiLabel('chat'), 'Chat Completions 接口');
   assert.equal(logic.apiLabel('messages'), 'Messages 接口');

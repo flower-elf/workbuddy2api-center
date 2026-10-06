@@ -1,15 +1,4 @@
-"""settings.json: 并发读写、坏文件处理与凭据比较。
-
-四个真实故障:
-1. load() 不持锁: 读取线程打开 settings.json 的瞬间, 另一个线程的 os.replace()
-   在 Windows 上直接失败 (WinError 5 拒绝访问); 临时文件名固定为
-   settings.json.tmp 时, 另一个进程写了一半的临时文件会被本进程截断。
-2. 解析失败时 load() 返回空字典: 面板密码退回默认 admin, 后续 save() 再把空
-   字典写回磁盘, 整份设置被抹掉; 带 BOM 的合法文件也被当成解析失败。
-3. panel_password_rounds 只做 int(): "abc" 表现为"密码错误", 0 回退默认 cost,
-   超大值把登录卡住。
-4. hmac.compare_digest() 不接受含非 ASCII 字符的 str: 非 ASCII 凭据抛
-   TypeError, 而不是正常返回"不匹配"。
+"""settings.json 的并发读写、坏文件处理与凭据比较;坏文件必须抛错,不能当成空字典。
 
 无网络访问。
 """

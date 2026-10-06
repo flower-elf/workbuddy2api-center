@@ -1,8 +1,7 @@
 # Regenerate the two .bat launchers so they survive paths containing
-# parentheses / ampersands / spaces. cmd.exe aborts with
-# "... was unexpected at this time." when %VAR% inside an if(...) block
-# expands to a path containing '('. Every check therefore uses
-# if/errorlevel/goto instead of parenthesised blocks.
+# parentheses / ampersands / spaces. cmd.exe aborts with "... was unexpected
+# at this time." when %VAR% inside an if(...) block expands to such a path,
+# so every check uses if/errorlevel/goto instead of parenthesised blocks.
 import pathlib
 
 LAN = [

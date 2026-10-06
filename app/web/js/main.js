@@ -12,7 +12,7 @@ import { toast } from './ui/toast.js';
 import { showLogin } from './pages/login.js';
 
 const app = document.getElementById('app');
-// 顶栏状态点：账号总数与可用数来自 /panel/status，只有带面板会话时才返回。
+// 顶栏状态点来自 /panel/status，该接口只在带面板会话时返回。
 let gateway = { ok: null, ready: 0, total: 0 };
 let gatewayTimer = null;
 let shellRunning = false;
@@ -157,7 +157,7 @@ async function startShell() {
   armGatewayTimer();
 }
 
-/** 顶栏状态点按设置的间隔轮询；间隔为 0 时只保留进入面板时的那一次检查。 */
+/** 按设置的间隔轮询顶栏状态点；间隔为 0 时不挂定时器。 */
 function armGatewayTimer() {
   clearInterval(gatewayTimer);
   gatewayTimer = null;

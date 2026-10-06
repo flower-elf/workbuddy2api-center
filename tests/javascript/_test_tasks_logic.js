@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import * as logic from '../../app/web/js/pages/tasks/logic.js';
 
-// ---- 调度器：两个版本的模式文案、按钮文字与时间行各不相同
+// ---- 调度器：两个版本的模式文案与按钮文字不同
 const running = {
   enabled: true,
   mode: '通用模式',
@@ -73,7 +73,7 @@ assert.equal(logic.travelView({ state: 'idle', daily_limit_reached: true }, trav
 assert.equal(logic.travelView({}, travelNow).text, '状态未知');
 assert.equal(logic.travelView(null, travelNow).desc, '没有读取到猫猫旅行的状态');
 
-// ---- 账号下拉：第一项是批量，当前值失效时回到批量
+// ---- 账号下拉：第一项是批量，失效值回到批量
 const options = logic.growthAccountOptions([{ uid: 'abcdef1234', nickname: '国内一号' }], 'all');
 assert.equal(options.selected, 'all');
 assert.equal(options.options[0].label, '全部国内账号 (批量)');

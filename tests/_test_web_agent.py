@@ -1,8 +1,6 @@
 """网页打卡要真的把会话驱动起来，不能只建会话（issue #90）。
 
-POST /console/as/conversations/ 只是排队；agent 要等客户端接上沙箱（ACP over
-HTTP + SSE）并请求这一轮才会跑。这里钉住那个调用顺序，以及两种结果怎么上报：
-跑完（completed）和没跑完。
+POST /console/as/conversations/ 只是排队，agent 要等客户端接上沙箱（ACP over HTTP + SSE）并请求这一轮才会跑；调用顺序与两种上报结果在此钉住。
 """
 import http.client
 import io

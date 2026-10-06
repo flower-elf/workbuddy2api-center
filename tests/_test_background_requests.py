@@ -1,20 +1,5 @@
-"""The background-request filter must not swallow a request the user asked for.
-
-The filter matches a keyword against request_kind / turn_trigger /
-thread_source, and the user's own "compact the context" request carries
-request_kind=compaction - the same word as the background keyword. Once the
-filter was switched on, pressing that button returned the refusal instead of a
-summary. The two requests are told apart by the thread they run on: the
-compaction the client starts by itself names the job that started it
-(thread_source=memory_consolidation), while the operator's compaction runs on
-the user's thread.
-
-thread_source=user is not a general "the user asked for this" marker - an
-auto_review the client fires on the user's thread carries it too, which is why
-the exemption is scoped to request_kind=compaction instead of to the thread.
-
-These cases pin that distinction, both shapes the metadata arrives in, and the
-background jobs the filter exists for. No network access required.
+"""The filter must not refuse the user's own compaction, told apart by thread_source=memory_consolidation;
+thread_source=user alone is not a user marker. No network access required.
 """
 
 import json
@@ -91,10 +76,7 @@ for label, meta in background:
 print()
 print("[3] an unknown thread source is treated as the user's own request")
 
-# Only the sources the client uses for jobs it starts are listed, so a source
-# nobody has seen yet falls through to "the user asked for it". That is the
-# deliberate direction: wrongly refusing here removes a button the user can
-# see, while wrongly allowing only costs the credits the filter would save.
+# 未见过的新来源按用户请求放行是刻意的：误拒会砍掉用户可见的按钮，误放行只损失过滤省下的积分。
 check("compaction with an unrecognised source",
       proxy.background_request_reason(
           nested({"request_kind": "compaction", "thread_source": "compaction"})) == "")

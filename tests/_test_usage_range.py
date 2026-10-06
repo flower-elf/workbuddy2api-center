@@ -1,17 +1,6 @@
-"""Deterministic tests for the dashboard time-range filter (issues #39, #68).
+"""用量接口的时间范围筛选（issues #39, #68）：today/week/month 是锚定当地零点的自然窗口，custom 两端可开可闭。
 
-The metrics page reports the selected window and all time side by side. The
-range selector used to drive only the KPI cards, so the model matrix kept
-showing all-time figures while the page claimed today; /usage and /usage/perf
-now accept a range parameter and this pins its semantics.
-
-The selector also grew past "today / all time" (issue #68): this week, this
-month and a custom interval. Two things matter for those and are pinned here:
-the bounds are calendar windows anchored to local midnight, and the resolved
-bounds - not a today/all flag - key the caches, because this week and this
-month overlap and one entry cannot describe both.
-
-No network: the usage log is synthesised in a temp directory.
+缓存以解析出的边界为键，today/all 标记区分不了重叠的本周与本月；不联网，用量日志在临时目录里合成。
 """
 import io
 import json
@@ -171,9 +160,7 @@ check("week counts every row from its Monday on", week["requests"] == want_week,
       (week["requests"], want_week))
 check("month counts every row from the 1st on", month["requests"] == want_month,
       (month["requests"], want_month))
-# Overlapping windows are the trap the old today/all cache key could not
-# express: a shared entry would serve one window's totals under the other's
-# label, and the numbers below would come out identical.
+# 本周与本月重叠：共用一条缓存会把一个窗口的合计挂在另一个标签下。
 cached_week = P.usage_snapshot(realm="all", ttl=60, range="week")
 cached_month = P.usage_snapshot(realm="all", ttl=60, range="month")
 check("a cached week read is not served for month",

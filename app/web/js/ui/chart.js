@@ -23,7 +23,7 @@ function withAlpha(rgb, alpha) {
 }
 
 /**
- * series: [{ label, data: number[], color: '--chart-1' 或颜色值, dashed, fill, format(v) }]
+ * series: [{ label, data: number[], color: '--chart-1' 或颜色值, dashed, fill, format(v), axis, order }]
  * 返回 { update({ labels, series }), destroy() }。
  */
 export function createTrendChart(canvas, initial) {
@@ -80,7 +80,7 @@ export function createTrendChart(canvas, initial) {
         interaction: { mode: 'index', intersect: false },
         layout: { padding: { top: 4, right: 8, left: 0, bottom: 0 } },
         plugins: {
-          // 图例只说明哪条线是什么，点击不切换数据集的显示，避免误点后某条线消失。
+          // 图例只作说明，点击不切换数据集的显示，避免误点后某条线消失。
           legend: { display: config.series.length > 1, position: 'top', align: 'end',
             onClick: () => {}, onHover: () => {},
             labels: { color: muted, boxWidth: 10, boxHeight: 2, font: { size: 11 } } },

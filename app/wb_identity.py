@@ -1,27 +1,9 @@
 # -*- coding: utf-8 -*-
-"""wb_identity.py - 出站身份 (WorkBuddy 桌面端 / 官方 VSCode 插件 / 官方 CodeBuddy CLI)
+"""wb_identity.py - 出站身份标头与端点 (WorkBuddy 桌面端 / 官方 VSCode 插件 / 官方 CodeBuddy CLI)
 
-支持三套出站身份:
-  1. WorkBuddy 独立桌面客户端 (workbuddy / desktop / wb):
-     - X-IDE-Type: WorkBuddy
-     - X-IDE-Name: WorkBuddy
-     - X-Product: WorkBuddy
-     - 国际版端点: www.workbuddy.ai (UA: WorkBuddy/5.5.2 WorkBuddy AI/5.5.2 CLI/5.5.2)
-     - 国内版端点: copilot.tencent.com (UA: WorkBuddy/5.5.6 WorkBuddy/5.5.6 CLI/2.137.1)
-
-  2. 官方 VSCode 插件 (vscode / vsc):
-     - X-IDE-Type: VSCode
-     - X-IDE-Name: VSCode
-     - X-Product: SaaS
-     - UA: VSCode/<ver> WorkBuddy/<ver>
-     - 国际版端点: www.workbuddy.ai，国内版端点: www.workbuddy.cn
-
-  3. 官方 CodeBuddy CLI (cli):
-     - X-IDE-Type: CLI
-     - X-IDE-Name: CLI
-     - X-Product: SaaS
-     - UA: CLI/<ver> CodeBuddy/<ver>
-     - 国际版端点: www.workbuddy.ai，国内版端点: copilot.tencent.com
+三套身份的 X-IDE-Type / X-Product、UA 与端点取值见 build_identity_headers() 与 _ENDPOINTS：
+桌面端为 WorkBuddy / WorkBuddy；VSCode 插件为 VSCode / SaaS，国内版端点 www.workbuddy.cn；
+CodeBuddy CLI 为 CLI / SaaS，国内版端点 copilot.tencent.com；三者的国际版端点都是 www.workbuddy.ai。
 """
 
 import uuid
@@ -63,7 +45,7 @@ _ENDPOINTS = {
 
 
 def endpoint_for(realm, product):
-    """返回 (chat base URL, X-Domain)。身份换了，端点也要跟着换。"""
+    """返回 (chat base URL, X-Domain)。"""
     key = ("cn" if realm == "cn" else "intl", normalize_product(product))
     return _ENDPOINTS[key]
 

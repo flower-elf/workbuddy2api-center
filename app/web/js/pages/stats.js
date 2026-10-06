@@ -131,10 +131,7 @@ export function mount(host) {
     load();
   }
 
-  /**
-   * 自定义区间第一次打开时把起点填成今天零点：空输入等于不限，画面会和「全部」一模一样，
-   * 看起来像按钮坏了。终点留空表示到现在。
-   */
+  /** 自定义区间第一次打开时把起点填成今天零点：空输入等于不限，画面会和「全部」一模一样，看起来像按钮坏了。终点留空表示到现在。 */
   function prefillCustomRange() {
     if (sinceInput) return;
     const d = new Date();

@@ -1,12 +1,6 @@
-"""用量流水记录本次请求实际使用的思考档位。
+"""用量流水记录本次请求实际使用的思考档位;不联网,设置与流水都写在临时目录。
 
-upstream_effort_of() 按上游真正会应用的方式解析档位:目录把某模型写死在一档时
-永远跑在那一档,关掉思考或写了 none 的请求记录 none,其次是客户端自己的值,最后
-是目录声明的默认档。open_upstream() 把解析结果交给响应函数,record_usage() 写成
-reasoning_effort,面板的请求日志据此在模型名旁边显示徽章。
-
-目录里没有 reasoning 元数据的模型与这次改动之前写下的老行都不能多出这个字段。
-不联网:设置与流水都写在临时目录。
+档位解析顺序:目录固定档 > 关掉思考或 none > 客户端值 > 目录默认档;目录里没有 reasoning 元数据的模型与老流水行不带这个字段。
 """
 import json
 import os
@@ -25,7 +19,7 @@ import wb_accounts
 import wb_proxy as P
 
 MODEL = "deepseek-v4.1-flash"
-#: 目录把这一档写死:reasoning.effort 有值、supportedEfforts 没有。
+#: 目录固定了这一档:reasoning.effort 有值、supportedEfforts 没有。
 PINNED_MODEL = "fast-model"
 #: 目录没有它的 reasoning 块,没有任何档位可报。
 PLAIN_MODEL = "default-model"
@@ -49,15 +43,13 @@ USAGE = {"prompt_tokens": 20, "completion_tokens": 6, "reasoning_tokens": 3,
 
 
 class EffortResolutionTests(unittest.TestCase):
-    """档位解析:目录固定档 > 关掉思考或 none > 客户端值 > 目录默认档。"""
-
     def test_a_model_the_catalog_pins_always_runs_there(self):
         self.assertEqual(P.model_fixed_effort(PINNED_MODEL), "medium")
         self.assertIsNone(P.model_default_effort(PINNED_MODEL),
-                          "写死一档的模型没有可挑的默认档")
+                          "固定档位的模型没有可挑的默认档")
         self.assertEqual(P.upstream_effort_of({}, PINNED_MODEL), "medium")
         self.assertEqual(P.upstream_effort_of({"reasoning_effort": "max"}, PINNED_MODEL),
-                         "medium", "写死一档的模型不接受客户端挑档")
+                         "medium", "固定档位的模型不接受客户端挑档")
         self.assertEqual(P.upstream_effort_of({"thinking": {"type": "disabled"}}, PINNED_MODEL),
                          "medium")
 
@@ -156,7 +148,7 @@ class OpenUpstreamTests(unittest.TestCase):
 
     def test_a_pinned_model_reports_its_level(self):
         self.assertIsNone(P.client_effort_of(P.build_upstream_body(chat(PINNED_MODEL))),
-                          "写死一档的模型不需要网关往请求体里补档位")
+                          "固定档位的模型不需要网关往请求体里补档位")
         self.assertEqual(self.effort_of(chat(PINNED_MODEL)), "medium")
 
     def test_thinking_off_reports_none(self):

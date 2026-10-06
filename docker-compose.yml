@@ -1,6 +1,9 @@
+# WorkBuddy2API-Center Docker Compose
+# 部署：docker compose up -d
+# 更新：docker compose pull && docker compose up -d
 services:
   wb-proxy-center:
-    build: .
+    # 追最新稳定版用 :latest；想固定版本可换成具体版本号（如 :0.2.0）
     image: ghcr.io/flower-elf/workbuddy2api-center:latest
     container_name: wb-proxy-center
     restart: unless-stopped
@@ -10,11 +13,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8788
-      # 留空则容器启动时自动生成 API Key（写入 ./accounts/settings.json，并打印在启动日志）；
-      # 想自己指定就取消下面这行注释并填上。
+      # 留空则启动时自动生成 API Key，写入 ./accounts/settings.json 并打印在启动日志；想自己指定就取消下面这行注释并填上。
       # - API_KEY=your_api_key_here
       - TZ=Asia/Shanghai
     volumes:
-      # 持久化挂载账号凭证与用量流水
       - ./accounts:/app/accounts
       - ./usage:/app/usage

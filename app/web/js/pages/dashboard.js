@@ -40,7 +40,6 @@ export function mount(host) {
     syncChart();
   }
 
-  /** 一份数据取回后写入对应的字段，字段名与数据语义一一对应。 */
   function apply(key, value) {
     if (key === 'accounts') accounts = value.accounts || [];
     else if (key === 'usage') usage = value;

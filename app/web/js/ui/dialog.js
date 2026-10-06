@@ -2,7 +2,7 @@ import { html, render, nothing } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { toastError } from './toast.js';
 
-// 弹窗。内容由函数生成，状态变化后调用 ctl.update() 重新绘制。
+// 弹窗；内容由函数生成，状态变化后调用 ctl.update() 重新绘制。
 const openStack = [];
 
 function overlayRoot() {
@@ -26,10 +26,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-/**
- * openDialog({ title, desc, icon, width, top, dismissible, body, foot, onClose })
- * title / desc / body / foot 可以是值或 (ctl) => 模板；返回 ctl = { close, update, element }。
- */
+/** title / desc / body / foot 可以是值或 (ctl) => 模板；返回 ctl = { close, update, element }。 */
 export function openDialog(options) {
   const { width = 512, top = false, dismissible = true, onClose } = options;
   const mask = document.createElement('div');
@@ -76,10 +73,7 @@ export function openDialog(options) {
   return ctl;
 }
 
-/**
- * 二次确认。onConfirm 执行期间两个按钮都不可点；它抛错时弹窗保持打开并提示原因。
- * 返回 Promise：确认并执行成功为 true，取消为 false。
- */
+/** 二次确认；onConfirm 执行期间两个按钮都不可点，它抛错时弹窗保持打开并提示原因。返回的 Promise 在确认并执行成功时为 true，取消为 false。 */
 export function confirmDialog({ title, desc, confirmText = '确认', cancelText = '取消', danger = false, onConfirm }) {
   return new Promise((resolve) => {
     let busy = false;

@@ -22,7 +22,7 @@ export function mount(host, ctx) {
     render(view(), host);
   }
 
-  /** 保存设置；成功返回服务端回写的整份设置视图，失败把错误抛给调用方。 */
+  /** 保存设置，成功时返回服务端回写的整份设置视图。 */
   async function save(payload) {
     const data = await postJSON('/settings/save', payload);
     state.view = data;
@@ -51,7 +51,7 @@ export function mount(host, ctx) {
     }
   }
 
-  /** 重新读取设置且只给出提示，不把失败抛给调用方：调用方多半刚完成一个写操作。 */
+  /** 重新读取设置，失败只给出提示：调用方多半刚完成一个写操作。 */
   async function reloadSettings() {
     try {
       const data = await getJSON('/settings');

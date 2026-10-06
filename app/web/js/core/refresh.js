@@ -1,5 +1,4 @@
-// 自动刷新间隔：保存在本浏览器（localStorage），单位秒，默认 60；0 表示不自动刷新。
-// 页面模块导出 autoRefresh 时按这个间隔刷新；运行日志页自带固定节奏，不受这里影响。
+// 自动刷新间隔：保存在 localStorage，单位秒，默认 60，0 表示不自动刷新；页面导出 autoRefresh 时按它刷新。
 import { readStore, writeStore } from './storage.js';
 
 export const DEFAULT_REFRESH_SECONDS = 60;
@@ -14,7 +13,7 @@ export function refreshSeconds() {
   return Math.min(value, MAX_SECONDS);
 }
 
-/** 写入并通知订阅者；返回规整后的秒数（空值或非法值回到默认）。 */
+/** 返回规整后的秒数，空值或非法值回到默认。 */
 export function setRefreshSeconds(value) {
   const parsed = Number.parseInt(value, 10);
   const seconds = Number.isFinite(parsed)

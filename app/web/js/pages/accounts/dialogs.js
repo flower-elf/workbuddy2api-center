@@ -1,5 +1,4 @@
-// 账号页的弹窗：添加账号、导入账号、备注、桌面客户端扫描。
-// 菜单栏的「添加账号」动作直接调用这里导出的 openAddAccountDialog。
+// 账号页的弹窗：添加账号、导入账号、备注、桌面客户端扫描；菜单栏的「添加账号」直接调用这里导出的 openAddAccountDialog。
 
 import { html, nothing, unsafeSVG } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
@@ -29,7 +28,7 @@ function qrSvg(text) {
 }
 
 /**
- * 添加账号 (OAuth)。默认选中当前查看的版本，授权链接生成后展示二维码与可复制链接，
+ * 添加账号 (OAuth)：默认选中当前查看的版本，链接生成后展示二维码与可复制链接，
  * 每 2 秒轮询一次登录状态，关闭弹窗时通知服务端取消本次登录。
  */
 export function openAddAccountDialog(options = {}) {
@@ -88,7 +87,7 @@ export function openAddAccountDialog(options = {}) {
       <button class="btn btn-primary" ?disabled=${phase === 'starting'} @click=${busyClick(() => startLogin())}>
         ${phase === 'starting' ? icon('LoaderCircle', 'spin') : icon('RefreshCw')}重新生成链接
       </button>`,
-    // 弹窗一关就停止轮询并通知服务端取消这次登录，避免留下一个没人认领的登录窗口。
+    // 弹窗一关就停止轮询并通知服务端取消这次登录，避免留下没人认领的登录窗口。
     onClose: () => {
       closed = true;
       stopPolling();
@@ -115,8 +114,7 @@ export function openAddAccountDialog(options = {}) {
     }
   }
 
-  // 关闭弹窗或切换版本时通知服务端放弃这次登录；失败也要让用户看到，
-  // 否则服务端会一直保留一个没人认领的登录窗口。
+  // 关闭弹窗或切换版本时通知服务端放弃这次登录；失败要提示，否则服务端会一直保留这个登录窗口。
   function cancelCurrent() {
     if (!state) return Promise.resolve();
     const pending = state;
@@ -177,7 +175,7 @@ export function openAddAccountDialog(options = {}) {
       }
       ctl.update();
     } catch (err) {
-      // 单次轮询失败通常是网络抖动，连续三次失败才提示，避免把等待中的用户吓走。
+      // 单次轮询失败多为网络抖动，连续三次失败才提示。
       failures += 1;
       if (failures >= 3) {
         message = '轮询暂时失败，仍在重试：' + err.message;
@@ -401,9 +399,8 @@ export function openNoteDialog(account, { onDone } = {}) {
 }
 
 /**
- * 桌面客户端账号扫描。页面上暂时没有入口：客户端自 2026-09-24 起把令牌改成
- * 加密存储，扫描到的是无法使用的信封文本，导入后每个请求都会失败。这段代码
- * 与后端接口都保留，等解密打通或改走 OAuth 之后再放回页面。
+ * 桌面客户端账号扫描。客户端自 2026-09-24 起把令牌改成加密存储，扫到的凭证无法使用，
+ * 导入后请求都会失败，因此页面上没有入口；代码与后端接口保留，等解密打通或改走 OAuth 后再放回。
  */
 export function openDesktopScanDialog() {
   let detected = null;

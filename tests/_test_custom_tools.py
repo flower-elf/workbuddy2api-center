@@ -1,7 +1,6 @@
 """Deterministic protocol-conversion tests for the custom-tool port.
 
-No network: feeds synthetic chat-completion objects/chunks into the translation
-functions and asserts the Responses-API shapes that Codex depends on.
+No network: synthetic chat-completion chunks go through the translation functions.
 """
 import json, os, sys, tempfile
 
@@ -156,7 +155,7 @@ check("no custom events for a normal tool", "custom_tool_call_input" not in raw2
 
 print()
 print("[8] aggregate_stream: empty tool_call placeholder fallback (Issue #15)")
-# Case A: upstream sends legacy function_call placeholder with finish_reason="tool_calls"
+# Case A: legacy function_call placeholder with finish_reason="tool_calls"
 stream_placeholder = [
     chunk({"content": "Hello!"}),
     chunk({"function_call": {"name": "", "arguments": ""}}, "tool_calls"),
@@ -165,7 +164,7 @@ res_a = P.aggregate_stream(iter(stream_placeholder), "m", None)
 check("placeholder: finish_reason downgraded to stop", res_a["choices"][0]["finish_reason"] == "stop")
 check("placeholder: message has no tool_calls", "tool_calls" not in res_a["choices"][0]["message"])
 
-# Case B: upstream sends name="" with non-empty arguments
+# Case B: name="" with non-empty arguments
 stream_nameless = [
     chunk({"content": "Thinking..."}),
     chunk({"tool_calls": [{"index": 0, "function": {"name": "", "arguments": '{"k":"v"}'}}]}, "tool_calls"),

@@ -1,18 +1,6 @@
-"""Regression tests for the tool_choice="none" do-it-forever loop.
+"""回归：tool_choice="none" 时不能删除 tools 声明，模型失去结构化工具通道后只会输出文本伪调用。
 
-Reported symptom: with deepseek-v4.1-flash driving an agent client, the model
-kept replying "I'll do it" without ever emitting a tool call, appending two
-messages per turn until the context reached ~297k tokens and the user had to
-abort the request by hand (usage.jsonl recorded outcome=client_aborted,
-gen_ms=128262, usage_missing=true).
-
-Root cause: normalize_tool_choice() deleted the whole `tools` declaration when
-the client sent tool_choice="none". Without the function schema the model could
-not use the structured tool channel, so it downgraded the call into DSML /
-pseudo-JSON text inside `content` (tool_calls empty, finish_reason=stop). The
-client parsed no call, asked again, and the model repeated itself forever.
-
-These tests pin the outbound shape so the deletion cannot come back.
+上游把 tool_choice 当字符串，对象形式要降级；出站请求体的形状由这里的用例锁住。
 """
 import json, os, sys, tempfile
 

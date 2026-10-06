@@ -1,20 +1,6 @@
-"""The gateway runs web_search / web_fetch itself, and the old defects stay fixed.
+"""The gateway declares and runs web_search / web_fetch itself; the queries array, duplicated declaration and resp_wrapup defects of issue #43 stay pinned here.
 
-The client declares web_search as a server-side tool the chat endpoint has no
-executor for, so the gateway declares a function-shaped one, swallows the calls
-and runs them locally. v1.5.0-1.5.2 did that and was reverted (issue #43) over
-three defects, all pinned here:
-
-  * a model answering with a `queries` array was told it had asked for nothing,
-    retried, and burned the round budget;
-  * the injected definition was appended next to the client's own declaration,
-    so the upstream saw two tools with the same name;
-  * an exhausted round budget ended in a synthesised resp_wrapup - a failure
-    presented as a normal finish, which the client showed as a cut-off answer.
-
-The last one is checked against a fake upstream that walks the real streaming
-path, so the number of response.created frames and the final event are observed
-rather than assumed. No network access required.
+No network access required: a fake upstream walks the real streaming path.
 """
 
 import contextlib
@@ -203,8 +189,7 @@ chat_body = {
     "model": "deepseek-v4.1-flash",
     "messages": [{"role": "user", "content": "tell me about cats"}],
     "tools": [W.web_search_tool_def()],
-    # responses_to_chat marks a request whose definitions the gateway swapped
-    # for its own; interception is tied to that mark (proxy.web_tools_active).
+    # responses_to_chat sets this mark when the gateway swaps in its own definitions; interception keys on proxy.web_tools_active.
     "_web_tools": True,
     "stream": True,
 }
@@ -249,8 +234,7 @@ def always_tool_body(body, session_key=None, target_realm=None, **kwargs):
     calls["n"] += 1
     calls.setdefault("bodies", []).append(body)
     if calls["n"] > W.MAX_WEB_ROUNDS:
-        # out of rounds: the gateway must have taken the tools away, so this
-        # answer is a real one and the stream can end normally.
+        # out of rounds: the tools must have been withdrawn, so this answer is real.
         return FakeUpstream(sse(ANSWER_CHUNKS)), FakeAccount(), None
     return FakeUpstream(sse(TOOL_CHUNKS)), FakeAccount(), None
 
@@ -478,10 +462,7 @@ def start_site(answer):
 
 @contextlib.contextmanager
 def net_to_site(site, seen, dns=None):
-    """把最后一跳换到本机测试服务：地址校验走真实代码，只有网络这一段是假的。
-
-    dns 可以模拟解析器给出的地址（sslip.io 这类名字在 CI 里未必解析得到）。
-    """
+    """把最后一跳换到本机测试服务：地址校验走真实代码，只有网络这一段是假的；dns 用来模拟 sslip.io 这类在 CI 里未必解析得到的名字。"""
     port = site.server_address[1]
 
     def create_connection(address, timeout=None, source_address=None):
@@ -608,7 +589,7 @@ check("after at most MAX_REDIRECTS hops", len(seen) == W.MAX_REDIRECTS + 1, len(
 print()
 print("[12] the response body has a byte cap, and a whole fetch has a deadline")
 
-SIZE = 64 * 1024 * 1024           # 64 MiB
+SIZE = 64 * 1024 * 1024
 BLOCK = b"a" * 65536
 
 
@@ -655,8 +636,7 @@ def serve_slow(req):
 
 slow_site = start_site(serve_slow)
 seen = []
-# 用 _remaining 同款时钟：墙上时钟与 monotonic 在 CI 机器上能差出几毫秒，
-# 用 time.time() 量这次抓取会让下界断言偶发不成立（实测 0.994s）。
+# 用 _remaining 同款时钟：用 time.time() 量这次抓取会让下界断言偶发不成立（实测 0.994s）。
 started = time.monotonic()
 with mock.patch.object(W, "FETCH_DEADLINE", 1), net_to_site(slow_site, seen):
     slow = W.fetch("http://%s:%d/slow" % (PUBLIC_IP, slow_site.server_address[1]))

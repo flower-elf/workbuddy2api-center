@@ -15,7 +15,7 @@ function memoryStorage() {
   };
 }
 
-// 浏览器全局对象的最小替身：store.js 读取地址栏并用 history.replaceState 改写 ?view=
+// 浏览器全局对象的最小替身：store.js 读地址栏并用 history.replaceState 改写 ?view=
 globalThis.location = new URL('http://panel.local/');
 globalThis.history = { replaceState: (_s, _t, url) => { globalThis.location = new URL(url, 'http://panel.local'); } };
 globalThis.localStorage = storageBlocked;
@@ -38,7 +38,7 @@ const refresh = await import('../../app/web/js/core/refresh.js');
 const palette = await import('../../app/web/js/ui/palette-logic.js');
 const router = await import('../../app/web/js/core/router.js');
 
-// ---- 存储被禁用时读写都不抛错；可用时能正常读写与删除
+// ---- 存储被禁用时不抛错，可用时能正常读写
 assert.equal(storage.readStore('x'), null);
 storage.writeStore('x', '1');
 globalThis.localStorage = memoryStorage();
@@ -47,7 +47,7 @@ assert.equal(storage.readStore('wb-test'), 'on');
 storage.writeStore('wb-test', null);
 assert.equal(storage.readStore('wb-test'), null);
 
-// ---- 自动刷新间隔：默认 60 秒，0 表示不自动刷新，空值回到默认，最多一小时
+// ---- 自动刷新间隔：默认 60 秒，0 表示不自动刷新，空值回默认，最多一小时
 assert.equal(refresh.refreshSeconds(), 60, '没设置过时用默认值');
 assert.equal(refresh.setRefreshSeconds('30'), 30);
 assert.equal(refresh.refreshSeconds(), 30);
@@ -70,7 +70,7 @@ assert.equal(refresh.refreshSeconds(), 60, '存储被禁用时用默认值');
 assert.doesNotThrow(() => refresh.setRefreshSeconds(5));
 globalThis.localStorage = memoryStorage();
 
-// ---- 请求错误：服务端的错误信息原样带出；401 触发会话失效处理；非 JSON 正文不会让调用方拿到空信息
+// ---- 请求错误：错误信息原样带出，401 触发会话失效，非 JSON 正文也有说明
 let lost = 0;
 api.onUnauthorized(() => { lost += 1; });
 server = { status: 400, body: { error: { message: 'current password is wrong' } } };
@@ -146,7 +146,7 @@ assert.equal(format.barColor(24.9), 'var(--danger)');
 assert.equal(format.barColor(0), 'var(--danger)');
 assert.equal(format.barColor(null), 'var(--danger)');
 
-// ---- 命令面板：名称全等优先于前缀与包含；多个词同时满足才算匹配；空查询保持登记顺序
+// ---- 命令面板：名称全等优先，词语需全部命中，空查询保持登记顺序
 const entries = palette.paletteEntries();
 assert.equal(palette.searchPalette(entries, '').length, entries.length);
 assert.ok(entries.some((e) => e.path === 'settings' && e.sub === 'proxy'), '设置页标签可以直接跳转');

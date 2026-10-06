@@ -1,5 +1,4 @@
-// 运行日志页的纯逻辑：筛选、合并去重、统计与文本导出。
-// 页面模板放在 logs.js 里，这一份不依赖浏览器，方便在 Node 里直接测试。
+// 运行日志页的纯逻辑：筛选、合并去重、统计与文本导出；页面模板放在 logs.js 里，这一份不依赖浏览器，方便在 Node 里直接测试。
 
 export const LOG_POLL_MS = 2000;
 export const LOG_RESET_LIMIT = 500;

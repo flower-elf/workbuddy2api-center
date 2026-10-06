@@ -73,14 +73,14 @@ export function mount(host, ctx) {
     }
   }
 
-  /** 提交整份密钥列表；成功返回 true，失败把错误抛给调用方。 */
+  /** 提交整份密钥列表；失败把错误抛给调用方。 */
   async function submit(payload, successText) {
     const data = await postJSON('/settings/save', payload);
     applyView(data);
     if (successText) toast.success(successText);
   }
 
-  /** 编辑起始的行号：让替换发生在正确的位置，新建时排在列表末尾。 */
+  /** 目标行在列表里的下标，找不到返回 -1。 */
   function rowIndex(id) {
     return state.rows.findIndex((row) => (row.id || '') === (id || ''));
   }

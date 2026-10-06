@@ -1,7 +1,5 @@
-/* 测试台纯逻辑：请求体组装、流式分片累积、用量行的文字与错误信息的清理。
- *
- * Run with Node: node tests/javascript/_test_playground_logic.js
- */
+/* 测试台纯逻辑：请求体组装、流式分片累积、用量行文字与错误信息清理。
+ * node tests/javascript/_test_playground_logic.js */
 import assert from 'node:assert/strict';
 import {
   accountHeader, accountOptions, applyChunk, buildChatBody, canSend, chunkError,
@@ -9,7 +7,7 @@ import {
   sessionCredit, usageParts,
 } from '../../app/web/js/pages/playground/logic.js';
 
-// 请求体：系统提示词可选，空内容的消息不发送，始终要求流式与用量
+// 请求体：系统提示词可选，空内容消息不发送
 assert.throws(() => buildChatBody({ model: '' }), /模型/);
 assert.deepEqual(buildChatBody({ model: 'glm-5.3' }), {
   model: 'glm-5.3', stream: true, stream_options: { include_usage: true }, messages: [],
@@ -39,13 +37,13 @@ assert.equal(answer.content, '你好');
 assert.equal(answer.finishReason, 'stop');
 assert.equal(answer.usage, null);
 
-// 用量分片：先到的一笔被后来的更大一笔替换，零值占位不会把已经拿到的用量擦掉
+// 用量分片：零值占位不覆盖已有用量
 answer = applyChunk(answer, { choices: [], usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 } });
 assert.equal(answer.usage.total, 30);
 answer = applyChunk(answer, { choices: [], usage: { total_tokens: 0 } });
 assert.equal(answer.usage.total, 30, '空用量分片不覆盖已有用量');
 
-// 流里的错误：带 HTML 的错误信息要清理干净，且不再当作内容累积
+// 流里的错误：HTML 要清理，且不当作内容累积
 const failed = applyChunk(emptyAnswer(), { error: { message: '<html><body><h1>401</h1></body></html>' } });
 assert.equal(failed.content, '');
 assert.equal(failed.error, '401');
@@ -55,7 +53,7 @@ assert.equal(applyChunk(answer, '[DONE]').done, true);
 assert.equal(applyChunk(answer, '[DONE]').content, '你好');
 assert.equal(applyChunk(answer, 'not json').done, false);
 
-// 用量字段的归一化：缓存命中取三种字段里的第一个
+// 用量字段归一化：缓存命中取三种字段里的第一个
 assert.deepEqual(normalizeUsage({ prompt_tokens: '12', completion_tokens: 3, total_tokens: 15,
   completion_tokens_details: { reasoning_tokens: 2 },
   prompt_tokens_details: { cached_tokens: 4 }, credit: '0.25' }),
@@ -64,7 +62,7 @@ assert.equal(normalizeUsage({ prompt_cache_hit_tokens: 7, prompt_tokens_details:
 assert.equal(normalizeUsage(null), null);
 assert.equal(normalizeUsage({ total_tokens: 5 }).hasCredit, false, '上游没给扣费项时不能当成 0');
 
-// 用量行：有什么写什么，扣费分两种情况
+// 用量行：有值才写
 const parts = usageParts({ prompt: 1234, completion: 56, reasoning: 12, cached: 0, total: 1290,
   credit: 0.0123, hasCredit: true }, 3420);
 assert.equal(parts.length, 3);
@@ -113,7 +111,7 @@ assert.equal(canSend({ model: 'glm-5.3', text: '   ', streaming: false }), false
 assert.equal(canSend({ model: '', text: '你好', streaming: false }), false);
 assert.equal(canSend({ model: 'glm-5.3', text: '', streaming: true }), true);
 
-// 账号下拉：只列可用档位的账号，标签用「昵称 · 短 uid」，昵称与短 uid 相同时不重复
+// 账号下拉：只列可用账号，标签为「昵称 · 短 uid」
 const now = Date.parse('2026-10-03T08:00:00Z');
 const ready = (uid, nickname) => ({
   uid, nickname, enabled: true, expiresAt: Math.floor(now / 1000) + 3600,

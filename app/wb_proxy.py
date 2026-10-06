@@ -2,11 +2,9 @@
 """WorkBuddy (workbuddy.ai) -> OpenAI-compatible reverse proxy.
 Reuses the credentials the WorkBuddy desktop app already stored on this machine
 (%%LOCALAPPDATA%%\\CodeBuddyExtension\\Data\\Public\\auth\\*.info), so no separate
-login is needed. Exposes:
-    GET  /v1/models
-    POST /v1/chat/completions     (stream=true and stream=false)
-    GET  /health
-Only the Python standard library is required.
+login is needed. Exposes GET /v1/models, POST /v1/chat/completions
+(stream=true and stream=false) and GET /health; only the Python standard
+library is required.
     python3 app/wb_proxy.py                    # bind 127.0.0.1:8788
     python3 app/wb_proxy.py --port 9000
     python3 app/wb_proxy.py --api-key sk-local # require a bearer token
@@ -23,12 +21,9 @@ import re
 import json
 import os
 MAX_PAYLOAD_BYTES = int(os.environ.get("WB_MAX_PAYLOAD_BYTES", 50 * 1024 * 1024))  # 50MB limit
-# Upstream chat calls may hold a handler thread for up to 600s, and every
-# request gets its own thread, so an unbounded pool lets a handful of slow
-# clients pin hundreds of threads and the memory behind them. Bound the number
-# of chat/responses requests in flight; dashboard and management calls are not
-# affected. Excess callers wait briefly, then get a 503 instead of queueing
-# forever.
+# Chat/responses calls run one thread each and may hold it for 600s, so the
+# number in flight is bounded; dashboard and management calls are not affected,
+# and excess callers wait briefly, then get a 503.
 MAX_CONCURRENT_CHAT = int(os.environ.get("WB_MAX_CONCURRENT_CHAT", 32))
 CHAT_SLOT_WAIT_SECONDS = float(os.environ.get("WB_CHAT_SLOT_WAIT", 30))
 import socket
@@ -56,20 +51,14 @@ def port_owner_hint(port):
     return "lsof -nP -iTCP:%d -sTCP:LISTEN" % port
 CURRENT_REALM = os.environ.get("WB_PROXY_DEFAULT_REALM", "intl")
 # 出口独占表：模型路由（detect_model_realm）与跨区拦截（exclusive_realm）共用
-# 这一份数据。两张表分开维护时互相矛盾：detect 把 glm-5v-turbo 之类判为国内
-# 独占，exclusive_realm 却不拦，请求被送到国际出口换回一个上游 403。
-#
-# glm-5.3-flash was listed as cn-only, but the international exit serves it:
-# an official intl account posting to www.workbuddy.ai gets HTTP 200, and the
-# intl desktop client ships it in its own model list. Only deepseek-v4-pro
-# still answers "service info not found" there.
+# 这一份数据；两张表分开维护会互相矛盾，请求被送到错误的出口换回上游 403。
 #
 # 只收录「确定只在一边提供服务」的名字；两边都服务的（deepseek-v4.1-flash、
-# hy3、glm-5.3 …）不能当冲突处理。国内独有一列对照内置快照
-# （wb_catalog.STATIC_CN_MODELS）：只在国内快照里出现的聊天模型
-# minimax-m2.5 / minimax-m2.7 / glm-5.0-turbo / glm-4.6v / kimi-k2-thinking
-# 归国内独有（原本只在 detect 表里）。快照里的旁支（deepseek-v3-1、kimi-k2.5、
-# hunyuan-* …）没有任何出口实测依据，不凭推测划为独占。
+# hy3、glm-5.3 …）不按冲突处理。实测 glm-5.3-flash 在国际出口同样有服务，
+# 只有 deepseek-v4-pro 仍报 service info not found。国内独有对照内置快照
+# wb_catalog.STATIC_CN_MODELS 确定：只在国内快照里出现的聊天模型归国内独有；
+# 快照里的旁支（deepseek-v3-1、kimi-k2.5、hunyuan-* …）没有出口实测依据，
+# 不凭推测划为独占。
 INTL_EXCLUSIVE_PREFIXES = ("gpt-", "gemini-")
 CN_EXCLUSIVE_PREFIXES = ("minimax-", "deepseek-v4-pro")
 INTL_EXCLUSIVE = {
@@ -104,14 +93,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 def install_console_close_handler():
     """Release the port when the console window is closed by the user.
-    Windows does not kill child processes when a console window closes, so
-    the proxy (started by the .bat as a child of cmd.exe) would survive and
-    keep the port bound - the next launch then wrongly reports "another
-    proxy is already running".
-    Closing the window raises CTRL_CLOSE_EVENT in every process attached to
-    that console, which is exactly the signal we want. Registering a handler
-    for it is event-driven, so unlike polling a parent pid there is no
-    chance of a false positive. Harmless when started without a console.
+
+    Windows does not kill child processes when a console window closes, so the
+    proxy would survive and keep the port bound. Closing the window raises
+    CTRL_CLOSE_EVENT in every process attached to that console, and the
+    handler does nothing when started without one.
     """
     if os.name != "nt":
         return None
@@ -142,11 +128,9 @@ MODELS_PATH = "/v2/enterprises/personal/models"
 # 测试台把一次调试固定在一个账号上时带这个头；只有面板会话认它
 DEBUG_ACCOUNT_HEADER = "X-Debug-Account"
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
-# The WorkBuddy AI desktop app caches its account product config here on every
-# launch. That file carries the real model catalog the app shows in its picker
-# (21 models, incl. deepseek-v4.1-flash / gpt-6-astra) - the CLI-facing
-# /v2/enterprises/personal/models endpoint returns a narrower list, so prefer
-# the cache and fall back to the endpoint.
+# The desktop app writes its account product config here on every launch. It
+# carries the real picker catalogue, wider than what the CLI-facing
+# /v2/enterprises/personal/models endpoint returns, so prefer the cache.
 PRODUCT_CONFIG_CACHE = os.path.join(os.path.expanduser("~"), ".workbuddy-ai", "cache", "acc-product-config-v3.json")
 NOISE_KEYS = ("extra_fields", "refusal", "reasoning_content")
 _CHUNK_SIZE_RE = re.compile(rb"[0-9A-Fa-f]{1,16}")
@@ -155,8 +139,8 @@ _CHUNK_SIZE_RE = re.compile(rb"[0-9A-Fa-f]{1,16}")
 def _chunk_size(line):
     """Chunk size from a chunked-encoding size line, None when malformed.
 
-    int(x, 16) alone would also take "-30d40" or "+1f", and a negative size
-    lowers the running total under the payload cap.
+    int(x, 16) alone also takes "-30d40" or "+1f"; a negative size would
+    lower the running total under the payload cap.
     """
     field = line.split(b";", 1)[0].strip()
     if not _CHUNK_SIZE_RE.fullmatch(field):
@@ -171,10 +155,9 @@ class BodyTooLarge(Exception):
         self.length = length
 class BadJSON(Exception):
     """Raised when a request body is present but not a JSON object."""
-# CORS is only needed by browser-based chat clients that call the OpenAI-style
-# API from another origin. Management routes (accounts, settings, usage,
-# scheduler, panel) serve the dashboard, which is same-origin, so they get no
-# ACAO header - that keeps a stray page on the LAN from reading their replies.
+# CORS is only for browser chat clients calling the OpenAI-style API from
+# another origin; management routes get no ACAO header, so a stray page on the
+# LAN cannot read their replies.
 CORS_PATH_PREFIXES = ("/v1", "/chat", "/completions", "/models", "/responses")
 # Management paths that happen to live under /v1 must not be treated as API:
 # /v1/usage reports account-level spend and is gated by the panel session.
@@ -202,8 +185,7 @@ def _prune_login_attempts(now=None, window=60):
         else:
             del _login_attempts[ip]
 _models_cache = {"intl": {"at": 0.0, "data": None}, "cn": {"at": 0.0, "data": None}}
-# Usage accounting: every upstream response carries a usage block, and the
-# proxy also records one JSONL line per request. Defaults to the project root,
+# Usage accounting: one JSONL line per request. Defaults to the project root,
 # the folder that holds the launchers; override with --usage-dir or
 # WB_PROXY_USAGE_DIR.
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -213,7 +195,7 @@ USAGE_DIR = os.environ.get("WB_PROXY_USAGE_DIR") \
 USAGE_LOG = os.path.join(USAGE_DIR, "usage.jsonl")
 
 # 看板「运行信息」与响应头 Server 共用的版本号。
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 
 def credit_events_file():
@@ -225,8 +207,7 @@ def credit_events_file():
     return os.path.join(USAGE_DIR, "credit_events.jsonl")
 
 
-# 余额读取成功后由 wb_accounts.fetch_credits() 追加流水，写进哪个目录只有
-# 这里知道，所以把路径来源注入过去。
+# wb_accounts.fetch_credits() 追加流水时需要写入目录，注入这里的路径来源。
 wb_accounts.set_credit_events_provider(credit_events_file)
 
 # 看板前端：app/web/index.html 是页面外壳，其余静态资源经 /web/<相对路径> 提供。
@@ -243,9 +224,8 @@ WEB_CONTENT_TYPES = {
 }
 USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "reasoning_tokens",
                 "cached_tokens", "total_tokens", "credit")
-# Web-panel access control. The panel is gated by its own password (default
-# "admin"), independent of the /v1 API key. Sessions live in memory only, so a
-# restart forces browsers to log in again.
+# Web-panel access control: its own password (default "admin"), independent of
+# the /v1 API key; sessions are in memory only, so a restart forces a new login.
 PANEL = wb_settings.PanelSessions()
 API_KEY_FILE_SET = False
 def configured_keys():
@@ -264,9 +244,9 @@ def auth_required():
     return bool(API_KEY)
 def identify_key(supplied):
     """Return the key entry a caller used, or None when nothing matches.
+
     Once the panel has at least one key, those keys are the only accepted
-    credentials - otherwise a launcher key left in a .bat file would silently
-    keep working after the panel was locked down.
+    credentials, so a launcher key in a .bat file stops working.
     """
     extra = () if configured_keys() else (API_KEY,)
     return wb_settings.match_api_key(ACCOUNTS_DIR, supplied, extra_keys=extra)
@@ -274,19 +254,17 @@ def _empty_stats():
     return {"requests": 0, "errors": 0, "prompt_tokens": 0, "completion_tokens": 0,
             "reasoning_tokens": 0, "cached_tokens": 0, "total_tokens": 0,
             "credit": 0.0, "started": time.time(), "by_model": {},
-            # Same aggregation keyed by (model, realm), so the metrics table
-            # can show one row per exit for a model that ran through both.
+            # Same aggregation keyed by (model, realm), then by
+            # (model, realm, account), so a model can be split per exit and
+            # per account.
             "by_model_realm": {},
-            # And again keyed by (model, realm, account), so a model served
-            # by two accounts on the same exit can be split per account.
             "by_model_acct": {},
             # latency accumulators (averages; percentiles come from the JSONL)
             "ttft_ms_sum": 0, "ttft_samples": 0,
             "gen_ms_sum": 0, "gen_samples": 0,
             "wall_ms_sum": 0, "wall_samples": 0}
-# Every aggregate the dashboard shows is recomputed from usage.jsonl; the only
-# thing this dict carries is the process start time the snapshot labels its
-# window with.
+# Everything the dashboard aggregates is recomputed from usage.jsonl; this dict
+# only carries the process start time the snapshot labels its window with.
 _usage = {"started": time.time()}
 def _extract_usage(usage):
     """Normalize the upstream usage block into the fields we track."""
@@ -306,10 +284,9 @@ def _extract_usage(usage):
 def row_realm(row):
     """The realm a log row belongs to.
 
-    Rows written since the field was added carry it directly. Older rows are
-    attributed by their account, then by the model's home realm - the same
-    order row_matches_realm used, so a filter and a per-realm breakdown can
-    never disagree about the same row.
+    Newer rows carry the field; older ones fall back to the account, then to
+    the model's home realm - the same order row_matches_realm used, so a
+    filter and a per-realm breakdown agree about the same row.
     """
     r = row.get("realm")
     if r:
@@ -326,21 +303,16 @@ def row_realm(row):
 
 
 def row_matches_realm(row, realm):
-    # None means every realm. "all" is accepted here as well so that a caller
-    # that forwards the literal cannot silently match nothing: the previous
-    # behaviour compared every row's realm against the string "all".
+    # None means every realm; the literal "all" is accepted as well so a caller
+    # forwarding it cannot silently match nothing.
     if not realm or realm == "all": return True
     return row_realm(row) == realm
 def realm_scope(realm, fallback=None):
     """Map a caller-supplied realm onto a log filter.
 
-    "all" means every realm, so it becomes None and disables filtering
-    entirely: passing the literal through would make row_matches_realm
-    compare every row against "all" and match nothing at all. An empty
-    or missing value falls back to the second argument: CURRENT_REALM for
-    the endpoints whose clients expect the global switch, None (everything)
-    for the analytics payload, which has always reported both realms
-    combined.
+    "all" becomes None, which disables filtering entirely; an empty or missing
+    value falls back to the second argument, CURRENT_REALM for the endpoints
+    whose clients expect the global switch and None for the analytics payload.
     """
     if realm == "all":
         return None
@@ -351,7 +323,7 @@ def _local_midnight(ts=None, days_back=0):
     """Local midnight `days_back` days before `ts` (default: now).
 
     mktime normalises an out-of-range day, so stepping back past the 1st of a
-    month still lands on a real local midnight instead of raising.
+    month still gives a real local midnight.
     """
     lt = time.localtime(ts if ts is not None else time.time())
     return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday - days_back, 0, 0, 0, 0, 0, -1))
@@ -360,10 +332,9 @@ def _local_midnight(ts=None, days_back=0):
 def _epoch_or_none(value):
     """A panel-supplied epoch second, or None when it cannot be trusted.
 
-    A negative or unparseable bound is dropped rather than clamped. The panel
-    rejects those before they are ever sent, so one arriving here means a
-    hand-written URL, and "no bound on this side" is a much smaller surprise
-    than silently slicing the log at 1970.
+    A negative or unparseable bound is dropped rather than clamped: "no bound
+    on this side" is a much smaller surprise than silently slicing the log at
+    1970.
     """
     if value in (None, "", False):
         return None
@@ -377,23 +348,16 @@ def _epoch_or_none(value):
 def range_window(value, since=None, until=None):
     """Resolve the dashboard's time-range selector into a (since, until) pair.
 
-    Both bounds are cutoffs on a row's `at`; None means "unbounded on that
-    side", and (None, None) - an unknown, empty or missing range - disables
-    filtering entirely, which is what every caller did before windows existed,
-    so an older panel keeps receiving the full history it used to get.
+    Both bounds are cutoffs on a row's `at`; None means unbounded on that
+    side, and an unknown or missing range disables filtering entirely, so an
+    older panel keeps receiving the full history it used to get.
 
-    today/week/month are calendar windows anchored to local midnight, matching
-    the definition the analytics payload has always used for its Today
-    figures: two different meanings of "today" on one page would be worse than
-    either. The week starts on Monday. Rolling aliases ("7d", "30d") are
-    deliberately absent - they would mean "the last seven days", which is a
-    different window from "this week" and would make the button's label wrong
-    on six days out of seven.
-
-    custom takes the two epochs the panel sends. Either side may be missing
-    ("from this date onwards" / "up to this date"), and reversed bounds are
-    swapped rather than rejected, because the two inputs are independent and
-    an empty end is the normal case.
+    today/week/month are calendar windows anchored to local midnight, the
+    definition the analytics payload uses for its Today figures; the week
+    starts on Monday. Rolling aliases ("7d", "30d") are deliberately absent,
+    since "the last seven days" is a different window from "this week".
+    custom takes the two epochs the panel sends: either side may be missing,
+    and reversed bounds are swapped rather than rejected.
     """
     v = str(value or "").strip().lower()
     if v in ("today", "day", "1d"):
@@ -414,9 +378,8 @@ def range_window(value, since=None, until=None):
 def range_query(query):
     """Pull the three range parameters out of a parsed query string.
 
-    parse_qs hands every key back as a list, and an older panel that sends
-    none of them at all is the normal case, so every lookup falls back to
-    None - which range_window() reads as "no filter on that side".
+    Every lookup falls back to None, which range_window() reads as "no filter
+    on that side".
     """
     def first(name):
         values = query.get(name) or [None]
@@ -425,9 +388,8 @@ def range_query(query):
 def row_outcome(row):
     """Terminal state of a request row.
 
-    Rows written before the outcome field existed only carry error/status,
-    so they fall back to that: an error row is a failure, anything else is a
-    completed request. One helper keeps every reader agreeing on the answer.
+    Rows written before the outcome field existed fall back to error/status:
+    an error row is a failure, anything else is a completed request.
     """
     o = row.get("outcome")
     if o:
@@ -436,10 +398,9 @@ def row_outcome(row):
 def audit_columns(audit):
     """The per-request audit fields a usage row carries.
 
-    Captured once when the request arrives (see Handler._begin_audit) instead
-    of being read back from the handler later: a streaming response or a
-    web-tool follow-up round finishes long after the request line was parsed,
-    and by then the same connection may already be serving the next request.
+    Captured once when the request arrives (Handler._begin_audit): a streaming
+    tail or a web-tool follow-up round finishes long after the request line
+    was parsed, and by then the connection may serve the next request.
     """
     audit = audit or {}
     return {
@@ -449,12 +410,11 @@ def audit_columns(audit):
     }
 
 
-# The audit fields of the request a thread is currently serving. A request
-# never moves between threads (the HTTP server gives each connection its own),
-# so a thread-local is enough to carry them into the streaming tail and the
-# web-tool follow-up rounds that run after the client's request was read; the
-# handler resets it at the start of every request, so a keep-alive connection
-# cannot inherit the previous request's fields.
+# The audit fields of the request a thread is currently serving: each
+# connection has its own thread, so a thread-local carries them into the
+# streaming tail and web-tool follow-up rounds that run after the client's
+# request was read. The handler resets it per request, so a keep-alive
+# connection cannot inherit the previous request's fields.
 _REQUEST_AUDIT = threading.local()
 
 
@@ -492,22 +452,18 @@ def record_usage(model, usage, stream=None, elapsed_ms=None, ttft_ms=None, gen_m
                 account=None, outcome="completed", audit=None, effort=None):
     """Record one finished request as exactly one JSONL row.
 
-    A request without a usage block still gets a row (flagged usage_missing):
-    skipping it entirely used to drop the request from the request count,
-    success rate and latency samples, not just from the token totals.
+    A request without a usage block still gets a row (flagged usage_missing),
+    so it stays in the request count, success rate and latency samples.
 
     outcome is the terminal state: completed / client_aborted /
-    upstream_aborted / failed. It is deliberately not called status, because
-    status already means the HTTP status code on error rows.
+    upstream_aborted / failed. It is deliberately not called status, which
+    already means the HTTP status code on error rows.
 
-    audit carries key_id / ip / api and defaults to the audit context bound by
-    the handler serving this thread; a row written without one still gets the
-    fields, empty, so every reader can rely on their presence.
+    audit carries key_id / ip / api and defaults to the thread's audit
+    context; a row written without one still gets the fields, empty.
 
-    effort is the reasoning effort the request actually ran at, as resolved by
-    upstream_effort_of(). It is written only when the request had one: a model
-    without reasoning controls has nothing to report, and a row from before
-    this field existed cannot be told apart from it anyway.
+    effort is the reasoning effort the request actually ran at
+    (upstream_effort_of()), written only when the request had one.
     """
     if audit is None:
         audit = current_audit()
@@ -562,14 +518,7 @@ def record_usage(model, usage, stream=None, elapsed_ms=None, ttft_ms=None, gen_m
 
 
 def _persist_usage(row, fail_label):
-    """Append one usage row as a JSONL line.
-
-    usage-summary.json used to be rewritten on every single request - a full
-    json.dumps of the running totals, a uniquely named temp file and an
-    os.replace, plus the deep copy that fed it. Nothing in the tree ever
-    loads that file (every aggregate re-reads usage.jsonl), so the work was
-    pure overhead on the request path. One append per request now.
-    """
+    """Append one usage row as a JSONL line (every aggregate re-reads this log)."""
     try:
         os.makedirs(USAGE_DIR, exist_ok=True)
         with open(USAGE_LOG, "a", encoding="utf-8") as fh:
@@ -582,19 +531,15 @@ def record_error(model, status, message, elapsed_ms=None, account=None,
                  outcome="failed", audit=None):
     """Record one failed request as exactly one JSONL row.
 
-    Passing the account uid records which account the request was bound to, so
-    per-realm success rates attribute the failure by fact instead of falling
-    back to guessing from the model name.
+    Passing the account uid lets per-realm success rates attribute the failure
+    by fact instead of guessing from the model name.
 
     The usage argument carries whatever the upstream had already reported when
-    a stream broke. An aborted stream used to write an error row AND a usage
-    row, so one request counted as both a failure and a success; the token
-    totals stay accurate here without inflating the request count.
+    a stream broke, so the token totals stay accurate without the request
+    counting twice.
 
-    status stays the HTTP status code; outcome is the terminal state, so the
-    two never disagree about what the field means. audit carries the key id,
-    client ip and endpoint name and defaults to the context bound by the
-    handler serving this thread.
+    status stays the HTTP status code and outcome the terminal state; audit
+    defaults to the context bound by the handler serving this thread.
     """
     if audit is None:
         audit = current_audit()
@@ -639,18 +584,14 @@ _perf_lock = threading.Lock()
 
 
 def perf_stats(sample=5000, realm=None, ttl=None, range=None, since=None, until=None):
-    """Cached wrapper: parsing thousands of rows is CPU-heavy, and the
-    dashboard polls this endpoint every few seconds.
-
-    Rebuilds under the lock so a burst of pollers cannot each start their own
-    scan of the log."""
+    """Cached wrapper for a CPU-heavy scan the dashboard polls every few
+    seconds; rebuilds under the lock so parallel pollers share one scan."""
     ttl = _STATS_TTL if ttl is None else ttl
     r = realm_scope(realm, CURRENT_REALM)
     lo, hi = range_window(range, since, until)
     try:
         # The key carries the resolved bounds rather than a today/all flag:
-        # this week and this month overlap, so a flag cannot tell them apart
-        # and one window's latency would be served under the other's label.
+        # this week and this month overlap, so a flag cannot tell them apart.
         key = (int(sample), r or "all",
                lo if lo is not None else -1, hi if hi is not None else -1)
     except Exception:
@@ -670,20 +611,16 @@ def _perf_stats_uncached(sample=5000, realm=None, since=None, until=None):
     """Latency percentiles + derived rates, computed from the JSONL log."""
     ttfts, gens, walls, hits, tok_rates = [], [], [], [], []
     total = ok = err = aborted = 0
-    # 按模型聚合性能指标
+    # 按模型聚合性能指标；再按「模型 + 出口」「模型 + 出口 + 账号」各存一份，
+    # 同一模型跨出口、同出口多账号时能分开看。
     m_buckets = {}
-    # Same aggregation keyed by (model, realm), so the metrics table can
-    # report a model's latency per exit when it ran through both.
     mr_buckets = {}
-    # And keyed by (model, realm, account), so two accounts on one exit can
-    # be shown as separate rows.
     ma_buckets = {}
-    # 只读日志末尾 sample 行：原先 readlines() 会把整个日志读成字符串列表
+    # 只读日志末尾 sample 行，避免把整个日志读进内存
     rows = [raw.decode("utf-8", "replace") for raw in _tail_lines(USAGE_LOG, sample)]
-    # The tail read stops at `sample` lines, so a window wider than the sample
-    # is only described by its newest requests. Both facts are reported so the
-    # matrix can say the latency columns cover a partial slice instead of
-    # presenting them as the whole window.
+    # The tail read stops at `sample` lines, so a wider window is only
+    # described by its newest requests; both facts are reported so the matrix
+    # can say the latency columns cover a partial slice.
     sample_capped = len(rows) >= sample
     sample_from = None
     for line in rows:
@@ -708,8 +645,7 @@ def _perf_stats_uncached(sample=5000, realm=None, since=None, until=None):
         total += 1
         outcome = row_outcome(r)
         # Every row reaches the model bucket, whatever its outcome, so a model
-        # that only ever saw cancellations still shows up with a zero success
-        # count instead of silently vanishing from the per-model table.
+        # that only saw cancellations still shows up with a zero success count.
         m_id = r.get("model") or "unknown"
         r_realm = row_realm(r)
         mb = m_buckets.setdefault(m_id, {"total": 0, "ok": 0, "err": 0, "aborted": 0,
@@ -786,16 +722,14 @@ def _perf_stats_uncached(sample=5000, realm=None, since=None, until=None):
     return {
         "sampled": total,
         # Where the sampled slice starts and whether it was cut short, so a
-        # week/month view can admit that its latency columns do not reach back
-        # to the window's own start.
+        # week/month view can say its latency columns reach back only so far.
         "sample_from": sample_from,
         "sample_capped": sample_capped,
         "success": ok,
         "errors": err,
         "client_aborted": aborted,
-        # Success rate is measured against requests the gateway actually
-        # finished; client cancellations are reported separately rather than
-        # being counted as failures.
+        # Success rate counts only finished requests; client cancellations are
+        # reported separately.
         "success_rate_pct": round(ok * 100.0 / (ok + err), 1) if (ok + err) else None,
         "ttft_ms": block(ttfts),
         "generation_ms": block(gens),
@@ -853,25 +787,21 @@ def _perf_stats_uncached(sample=5000, realm=None, since=None, until=None):
     }
 _snap_cache = {}   # key -> {"at": float, "data": dict, "state": dict, "offset": int}
 _snap_lock = threading.Lock()
-# The dashboard polls every 5s. A TTL shorter than the poll interval makes
-# every other poll do the full uncached scan; 15s means at most one rebuild
-# per three polls while the numbers stay a few seconds stale at worst.
+# The dashboard polls every 5s; a 15s TTL means at most one rebuild per three
+# polls while the numbers stay a few seconds stale at worst.
 _STATS_TTL = float(os.environ.get("WB_STATS_TTL", 15))
 
 
 # ---------------------------------------------------------------------------
 # Daily token guard
 #
-# The upstream caps a free window at a fixed token budget (code 6004), and by
-# the time it answers 429 the window is already spent. This counter lets the
-# operator park an account at a threshold instead: usage.jsonl is folded into
-# uid -> tokens-since-local-midnight, AccountPool.apply_daily_token_limit()
-# copies the numbers onto the accounts and ready() refuses them, so the next
-# request rotates to another account. The scan is incremental (byte offset +
-# per-day totals), so the hot path only reads rows that arrived since the
-# last scan. The same fold also accumulates each account's credit spend for
-# the day, which the scored placement divides by the elapsed hours to get a
-# credits-per-day rate.
+# The upstream caps a free window at a fixed token budget (code 6004) and only
+# answers 429 once it is spent, so this counter parks an account at a threshold
+# instead: usage.jsonl is folded into uid -> tokens-since-local-midnight,
+# AccountPool.apply_daily_token_limit() copies the numbers onto the accounts
+# and ready() refuses them, so the next request rotates. The scan is
+# incremental (byte offset + per-day totals), and the same fold accumulates
+# each account's daily credit spend for the scored placement.
 # ---------------------------------------------------------------------------
 _daily_usage = {"day": "", "totals": None, "credits": None, "offset": 0, "at": 0.0}
 _daily_usage_lock = threading.Lock()
@@ -880,17 +810,14 @@ _daily_usage_lock = threading.Lock()
 def _fold_new_rows(offset, fold, needle=None):
     """Feed every complete log row appended after byte `offset` to fold(row).
 
-    One cursor rule for the incremental readers in this file (the daily token
-    guard, the /usage snapshot, the analytics scan): rows are appended whole,
-    so a line without its trailing newline means this read raced the writer
-    and is left for the next scan. Returns (new_offset, reset); `reset` is
-    True when the log shrank below `offset` (truncated or rotated), which
-    means the caller has to drop what it accumulated and fold from zero.
+    Rows are appended whole, so a line without its trailing newline means this
+    read raced the writer and is left for the next scan. Returns (new_offset,
+    reset); reset is True when the log shrank below `offset`, meaning the
+    caller must drop what it accumulated and fold from zero.
 
     `needle` is an optional tuple of substrings: only lines containing one of
-    them are parsed. A per-key reader uses it to skip the rows of every other
-    key, which is most of a large log; a wrong needle would drop rows, so only
-    exact field text is passed here.
+    them are parsed, which lets a per-key reader skip most of a large log; a
+    wrong needle would drop rows, so only exact field text is passed here.
     """
     try:
         size = os.path.getsize(USAGE_LOG)
@@ -928,7 +855,7 @@ def _pool_fingerprint():
 
     A log row written before the realm field existed is attributed through
     the account that served it, so counters folded while an account was
-    missing must not be reused after it is added.
+    missing must not be reused.
     """
     if not POOL:
         return ""
@@ -969,8 +896,7 @@ def _scan_daily_tokens(offset, totals, credits):
 def daily_usage_by_account(ttl=None):
     """(uid -> 今日 Token, uid -> 今日积分)，缓存 `ttl` 秒，共用一份折叠。
 
-    None 表示日志完全读不出来：调用方要靠它区分「读不到」与「确实是 0」，
-    否则一次读取失败就会把账号当成今天没消耗过。
+    None 表示日志完全读不出来，调用方要把它与「确实是 0」区分开。
     """
     ttl = _STATS_TTL if ttl is None else ttl
     day = time.strftime("%Y-%m-%d")
@@ -1001,8 +927,8 @@ def daily_usage_by_account(ttl=None):
 def daily_tokens_by_account(ttl=None):
     """uid -> tokens counted since local midnight, cached for `ttl` seconds.
 
-    None means the log could not be read at all; callers keep that distinct
-    from zero so a failed read never parks an account.
+    None means the log could not be read; callers keep that distinct from zero
+    so a failed read never parks an account.
     """
     return daily_usage_by_account(ttl=ttl)[0]
 
@@ -1029,7 +955,7 @@ def credit_rate_scale(lt=None):
     """把「今天已消耗的积分」折算成每天消耗速度的倍数。
 
     刚过午夜时把几分钟的量当成一天的速率会放大几十倍，那段时间返回 1，
-    直接用今日累计值当速率：账号仍然能被选中，只是排序少了一份外推。
+    直接用今日累计值当速率。
     """
     lt = time.localtime() if lt is None else lt
     elapsed = lt.tm_hour + lt.tm_min / 60.0 + lt.tm_sec / 3600.0
@@ -1040,8 +966,8 @@ def apply_routing_inputs(refresh=False):
     """Push each account's recent credit spend onto the pool for the scored pick.
 
     Only the scored placement reads it, so the fold is skipped while the
-    switch is off. It shares the TTL cache and the incremental byte offset
-    with the daily token guard, so having both on does not read the log twice.
+    switch is off; it shares the TTL cache and byte offset with the daily
+    token guard, so having both on does not read the log twice.
     """
     if POOL is None or not POOL.smart_routing:
         return None
@@ -1066,25 +992,21 @@ def _prune_window_cache(cache, now):
 def usage_snapshot(realm=None, ttl=None, range=None, since=None, until=None):
     """Cached wrapper: the dashboard polls this every few seconds.
 
-    The rebuild happens while holding the lock on purpose. Releasing it first
-    let every concurrent caller run its own full scan of the JSONL when the
-    entry expired, so a single dashboard refresh could trigger several scans
-    of the same file.
+    The rebuild happens under the lock on purpose, otherwise every concurrent
+    caller runs its own full scan when the entry expires.
 
-    Each entry also keeps the folded counters and the byte offset they were
-    folded up to, so a rebuild reads only the rows appended since the last
-    one. The counters are window-specific, which is why they live with the
-    cache entry and why the window bounds are part of its key.
+    Each entry keeps the folded counters and the byte offset they reached, so
+    a rebuild reads only the rows appended since the last one; the counters
+    are window-specific, hence the window bounds in the key.
     """
     ttl = _STATS_TTL if ttl is None else ttl
     r = realm_scope(realm, CURRENT_REALM)
     lo, hi = range_window(range, since, until)
     now = time.time()
     with _snap_lock:
-        # Bounds, not a today/all flag: this week and this month overlap, so a
-        # flag would let one window serve the other's totals from the cache.
-        # The account set joins them because a row without a realm field is
-        # classified through the account that served it.
+        # Bounds, not a today/all flag: the two windows overlap, so a flag
+        # would let one serve the other's totals. The account set joins them
+        # because rows without a realm field classify through their account.
         key = "%s|%s|%s|%s" % (r or "all",
                                lo if lo is not None else "",
                                hi if hi is not None else "",
@@ -1130,13 +1052,12 @@ def _reset_snapshot_state(state):
 
 
 def _fold_snapshot_row(snap, row, realm, since, until):
-    # None means every realm; usage_snapshot() has already mapped "all"
-    # onto it, so the filter below is simply skipped.
+    # None means every realm; usage_snapshot() has already mapped "all" onto
+    # it, so the filter below is skipped.
     if realm and not row_matches_realm(row, realm):
         return
     # The window is applied before the request is counted, so every total
-    # below - requests, tokens, per-model and per-account breakdowns -
-    # describes the same slice of the log.
+    # below describes the same slice of the log.
     at = row.get("at") or 0
     if since and at < since:
         return
@@ -1145,11 +1066,10 @@ def _fold_snapshot_row(snap, row, realm, since, until):
     outcome = row_outcome(row)
     if outcome != "completed":
         snap["errors"] += 1
-        # Credit is money already spent: a request that failed after the
-        # upstream had billed for it still consumed credit, so it is summed
-        # here exactly like the analytics page sums it. Token totals keep the
-        # completed-only rule this page has always used, and a client abort is
-        # skipped because its usage block is incomplete.
+        # Credit is money already spent, so a request that failed after the
+        # upstream billed for it still sums its credit here, like the
+        # analytics page does; token totals keep the completed-only rule, and
+        # a client abort is skipped because its usage block is incomplete.
         if outcome != "client_aborted":
             snap["credit"] += (row.get("credit") or 0)
         return
@@ -1180,8 +1100,8 @@ def _fold_snapshot_row(snap, row, realm, since, until):
 def _usage_snapshot_payload(state, realm):
     """Reply body: a private copy of the counters plus the live pool fields.
 
-    The copy matters: the cached counters keep being folded in place while a
-    caller is still serialising the payload it received.
+    The copy matters: the cached counters keep being folded in place while the
+    caller serialises the payload it received.
     """
     rep = POOL.representative(realm=realm) if POOL else current_account()
     snap = copy.deepcopy(state)
@@ -1203,7 +1123,7 @@ def _usage_snapshot_payload(state, realm):
 def _tail_lines(path, max_lines, chunk=256 * 1024):
     """Return up to the last `max_lines` non-empty lines, oldest first.
 
-    The usage log passes 20MB within a day. Scanning it end to end on every
+    The usage log passes 20MB within a day, so scanning it end to end on every
     dashboard poll was the dominant cost behind slow /usage/* responses.
     """
     lines = []
@@ -1238,24 +1158,20 @@ def _tail_lines(path, max_lines, chunk=256 * 1024):
 
 _count_cache = {}
 _count_lock = threading.Lock()
-# The count only feeds the "N records" label. The poll interval is 5s, so a
-# TTL of the same length would miss on nearly every poll; 30s turns a full
-# scan per poll into one scan per six polls while the label stays current
-# enough for a record total that only ever grows.
+# The count only feeds the "N records" label. A 30s TTL turns a full scan per
+# poll into one scan per six polls while a total that only ever grows stays
+# current enough.
 _COUNT_TTL = float(os.environ.get("WB_COUNT_TTL", 30))
 
 
 def count_usage_rows(realm=None):
     """Cached row count - substring match instead of a full JSON parse.
 
-    Rows written before the `realm` field existed (they are all error rows)
-    have to fall back to the account/model heuristic in row_matches_realm,
-    so those few are still parsed properly.
+    Rows written before the `realm` field existed fall back to the
+    account/model heuristic in row_matches_realm and are still parsed.
 
-    This runs on every /usage/recent poll purely to render the page total,
-    and a full scan of the file dominated that endpoint (measured at ~50% of
-    its cost on a 45MB log). A short TTL keeps the number honest while
-    removing the scan from the poll path.
+    A full scan of the log dominated the /usage/recent poll, so a short TTL
+    keeps the number current while taking the scan off the poll path.
     """
     # Normalise first: the needle below is built from this value, so a
     # literal "all" would search for a realm field that never exists.
@@ -1305,10 +1221,9 @@ def _count_usage_rows_uncached(realm=None):
 def row_is_failed(row):
     """True when the row describes a request that did not succeed.
 
-    Rows written before the audit fields existed carry only error/status, so
-    the same fallback `row_outcome` uses decides: an error row or a non-2xx
-    status is a failure, and a client's own cancellation is not counted as
-    one (it is tracked through `outcome` instead).
+    Older rows carry only error/status, so the fallback `row_outcome` uses
+    decides: an error row or a non-2xx status is a failure, and a client
+    cancellation is not counted as one.
     """
     if row.get("error"):
         return True
@@ -1323,8 +1238,8 @@ def usage_filters(realm=None, key=None, status=None, model=None, account=None, i
     """Normalize the /usage/recent query into one filter dict.
 
     Every dimension is optional, and an empty or unknown value means "no
-    restriction on this dimension": an older panel that sends none of these
-    parameters keeps receiving the full history, exactly as before.
+    restriction on this dimension"; an older panel that sends none of these
+    parameters keeps receiving the full history.
     """
     lo, hi = range_window(range, since, until)
     wanted = str(status or "").strip().lower()
@@ -1343,9 +1258,9 @@ def usage_filters(realm=None, key=None, status=None, model=None, account=None, i
 def has_extra_filters(filters):
     """True when the tail-only path cannot answer: any dimension beyond realm.
 
-    The time window counts here as well: the unfiltered row count is a whole
-    log figure, so a windowed request has to go through the filtered scan even
-    though it names no key or status.
+    The time window counts as well: the unfiltered row count is a whole-log
+    figure, so a windowed request needs the filtered scan even without any key
+    or status filter.
     """
     filters = filters or {}
     if filters.get("since") is not None or filters.get("until") is not None:
@@ -1380,21 +1295,19 @@ def row_matches_filters(row, filters):
     return True
 
 
-# The JSONL lines hold the audit fields as their own text, so a line that does
-# not contain the exact field text cannot pass an exact-match filter either.
-# This keeps a filtered scan from parsing every row of a 45MB log; the realm
-# dimension stays separate because rows written before that field existed are
-# attributed through their account or model instead.
+# The JSONL lines hold the audit fields as their own text, so a line without
+# the exact field text cannot pass an exact-match filter; this keeps a filtered
+# scan from parsing every row. The realm dimension stays separate because
+# older rows are attributed through their account or model.
 _FILTER_NEEDLE_FIELDS = (("key", "key_id"), ("account", "account"))
 
 
 def _filter_needle_groups(filters):
     """Substrings a line must contain before it can possibly match.
 
-    A missing needle match is a safe reject for the dimensions compared whole
-    (an id or a uid). The ip filter compares a substring of the value, so its
-    needle only asks for the field to be present - a value needle would drop
-    the rows whose address merely ends with the searched text.
+    A missing needle is a safe reject for dimensions compared whole, an id or
+    a uid. The ip filter compares a substring of the value, so its needle only
+    asks for the field to be present.
     """
     groups = []
     for name, json_key in _FILTER_NEEDLE_FIELDS:
@@ -1415,8 +1328,7 @@ def _count_usage_rows_filtered(filters):
     """Rows matching every filter, over the whole log.
 
     A filtered total cannot come from a tail read, so it costs one pass; the
-    result is cached briefly like the unfiltered count, because the request
-    log polls this endpoint every few seconds.
+    result is cached briefly like the unfiltered count.
     """
     key = json.dumps(filters, sort_keys=True, ensure_ascii=False)
     now = time.time()
@@ -1465,8 +1377,7 @@ def key_display_names():
     """key_id -> the name the request log shows for it (contract 6.2).
 
     Names come from the current key list, so a renamed key shows its new name
-    on old rows too. "panel" is the test bench's own session and an id that no
-    longer exists is reported as deleted rather than left blank.
+    on old rows too; an id that no longer exists is reported as deleted.
     """
     names = {"panel": "面板测试台"}
     for entry in configured_keys():
@@ -1477,12 +1388,10 @@ def key_display_names():
 def recent_usage(limit=100, realm=None, page=1, filters=None):
     """Paginated rows from the tail of the log (page 1 is latest).
 
-    Reading backward in chunks keeps this in the millisecond range while
-    accurately fetching any requested page without missing rows across realms.
-    With filters active the total needs one pass over the log (cached briefly,
-    like the unfiltered count) while the backward read keeps going until the
-    requested page is filled, so a matching row from months ago is still found
-    without ever holding the whole file in memory.
+    Reading backward in chunks keeps this fast without missing rows. With
+    filters active the total needs one pass over the log, cached briefly, while
+    the backward read keeps going until the page is filled, so a matching row
+    from months ago is still found without holding the whole file in memory.
     """
     try:
         limit = max(1, int(limit))
@@ -1558,18 +1467,14 @@ def recent_usage(limit=100, realm=None, page=1, filters=None):
 POOL = None
 SCHEDULER = None
 # Same override rule as USAGE_DIR: the environment wins, the project folder is
-# the default. --accounts-dir resolves through the same variable, so the
-# import-time path and the CLI default can no longer disagree.
+# the default, and --accounts-dir resolves through the same variable.
 ACCOUNTS_DIR = os.environ.get("ACCOUNTS_DIR") \
     or os.path.join(PROJECT_DIR, 'accounts')
 def realm_state_file():
-    """Path of the persisted realm switch.
+    """Path of the persisted realm switch, computed on every access.
 
-    Computed on every access rather than cached in a module constant: the
-    constant was built from the default ACCOUNTS_DIR at import time, so a
-    later --accounts-dir (or a Docker volume pointing somewhere else) still
-    read and wrote the realm switch in the default folder - the panel then
-    reported an exit that did not match the configured account store.
+    A constant built at import time would ignore a later --accounts-dir or a
+    Docker volume pointing somewhere else.
     """
     return os.path.join(ACCOUNTS_DIR, "active_realm.json")
 
@@ -1628,8 +1533,7 @@ def read_credit_events(realm=None, limit=20, offset=0):
     """积分变动流水，最新在前：{events, total, offset, limit}。
 
     只返回最近 30 天的记录，与写入时的保留期一致。文件量级很小，整份读入
-    再倒序即可；损坏的行跳过。total 是筛选后的总条数，events 是从 offset
-    起的 limit 条。
+    再倒序即可；损坏的行跳过。
     """
     realm = realm_scope(realm)
     try:
@@ -1733,9 +1637,9 @@ _byacct_lock = threading.Lock()
 
 
 def usage_by_account(ttl=None):
-    """Cached wrapper: full aggregation over the whole log is expensive.
+    """Cached wrapper: a full aggregation over the whole log is expensive.
 
-    Rebuilds under the lock, same reasoning as usage_snapshot."""
+    Rebuilds under the lock, same as usage_snapshot."""
     ttl = _STATS_TTL if ttl is None else ttl
     now = time.time()
     with _byacct_lock:
@@ -1788,11 +1692,10 @@ _analytics_lock = threading.Lock()
 
 # --------------------------------------------------------- per-key usage
 # One API key's consumption since its own usage_reset_at, folded from
-# usage.jsonl the same way the analytics caches fold it: one shared cursor
-# serves every configured key, so a poll only reads the bytes appended since
-# the last read and the first read pays a single pass instead of one per key.
+# usage.jsonl like the analytics caches: one shared cursor serves every
+# configured key, so a poll only reads the bytes appended since the last read.
 # The cache key carries each key's reset point, so a reset starts a fresh
-# accumulator while an unrelated poll keeps folding incrementally.
+# accumulator.
 
 _key_usage_cache = {}
 _key_usage_lock = threading.Lock()
@@ -1823,11 +1726,10 @@ def _key_usage_reset_map():
 def key_usage_snapshot():
     """{key_id: usage} for every configured key, folded in one shared pass.
 
-    Counts every row written with that key id, failed requests included: a
-    call that failed still used the key. Rows written before the key_id field
-    existed have nothing to attribute and are skipped; so are rows of a key
-    that is no longer configured, because its reset point is unknown - ask
-    `key_usage` about such an id and it scans for it directly.
+    Every row written with that key id counts, failed requests included: a
+    call that failed still used the key. Rows before the key_id field existed
+    and rows of a key that is no longer configured are skipped; `key_usage`
+    scans for such an id directly.
     """
     reset_map = _key_usage_reset_map()
     cache_key = json.dumps(reset_map, sort_keys=True)
@@ -1847,8 +1749,7 @@ def key_usage_snapshot():
 def _scan_key_usage(reset_map, offset, state):
     """Fold the log rows after `offset` into per-key accumulators.
 
-    Returns (state, new_offset); a log that shrank is folded again from zero,
-    because the accumulators describe a file that no longer exists.
+    Returns (state, new_offset); a log that shrank is folded again from zero.
     """
     def fold(row):
         key_id = row.get("key_id") or ""
@@ -1873,9 +1774,8 @@ def _scan_key_usage(reset_map, offset, state):
 def key_usage(key_id, reset_at=0):
     """Usage one API key accumulated since `reset_at` (0 = whole history).
 
-    A configured key is answered from the shared snapshot; an id that is not
-    configured, or a caller asking about a different reset point than the one
-    stored, gets its own needle-filtered scan of the log.
+    A configured key is answered from the shared snapshot; any other id, or a
+    different reset point, gets its own needle-filtered scan of the log.
     """
     key_id = str(key_id or "")
     if not key_id:
@@ -1916,24 +1816,18 @@ def _key_usage_needle(key_id):
 
 
 def compute_usage_analytics(ttl=None, realm=None, range=None, since=None, until=None):
-    """Cached analytics payload.
+    """Cached analytics payload, sharing the TTL of its siblings.
 
-    Unlike perf_stats/usage_snapshot/usage_by_account this used to run
-    uncached, re-reading the whole JSONL on every call while the metrics tab
-    polls it every 5 seconds. Same shared TTL as its siblings now, and the
-    rebuild runs under the lock so parallel pollers do not each scan the log.
-
-    The window joins the cache key for the same reason it does in the other
-    readers: the payload's window bucket is what the KPI cards print, and this
-    week and this month overlap, so one entry cannot serve both.
+    The rebuild runs under the lock so parallel pollers do not each scan the
+    log; the window joins the cache key because the payload's window bucket is
+    what the KPI cards print, and this week and this month overlap.
     """
     ttl = _STATS_TTL if ttl is None else ttl
     now = time.time()
     lo, hi = range_window(range, since, until)
     r = realm_scope(realm)
-    # The account set joins the key for the same reason it does in
-    # usage_snapshot: a row without a realm field is classified through the
-    # account that served it.
+    # The account set joins the key as in usage_snapshot: rows without a realm
+    # field classify through the account that served them.
     cache_key = "%s|%s|%s|%s" % (r or "all",
                                  lo if lo is not None else "", hi if hi is not None else "",
                                  _pool_fingerprint())
@@ -1977,11 +1871,10 @@ def _reset_analytics_state(state):
 def _scan_usage_log(state, offset, since=None, until=None, realm=None):
     """Fold the log rows appended after byte `offset` into the accumulators.
 
-    `all_summary` always covers the whole log (it is the stable reference the
-    page shows next to the selection); `window_summary` and the per-account /
-    per-model "window" buckets cover only the selected range, which is what
-    every figure on the first column of the page describes. Returns the new
-    offset; a log that shrank is folded again from zero.
+    `all_summary` always covers the whole log, the stable reference shown next
+    to the selection; the window summaries and per-account / per-model buckets
+    cover only the selected range. Returns the new offset; a log that shrank
+    is folded again from zero.
     """
     all_summary = state["all_summary"]
     window_summary = state["window_summary"]
@@ -1992,11 +1885,10 @@ def _scan_usage_log(state, offset, since=None, until=None, realm=None):
     def fold(r):
         if realm and not row_matches_realm(r, realm):
             return
-        # Only a genuine gateway/upstream failure is an error.
-        # A client cancellation is not: its token counts are
-        # incomplete, and folding them into the ratios this page
-        # reports would understate cache hit and speed. It is
-        # counted in perf_stats instead.
+        # Only a genuine gateway/upstream failure is an error; a client
+        # cancellation is not, and folding its incomplete token counts into
+        # the ratios this page reports would understate them. It is counted
+        # in perf_stats instead.
         outcome = row_outcome(r)
         if outcome == "client_aborted":
             return
@@ -2013,10 +1905,9 @@ def _scan_usage_log(state, offset, since=None, until=None, realm=None):
                 stat_obj["errors"] += 1
             else:
                 stat_obj["requests"] += 1
-            # Token totals follow actual consumption, so a request
-            # that failed after the upstream had already billed for
-            # tokens still shows them. Only the request/error
-            # counters depend on the outcome.
+            # Token totals follow actual consumption, so a request that failed
+            # after the upstream billed for tokens still shows them; only the
+            # request/error counters depend on the outcome.
             stat_obj["prompt_tokens"] += (r.get("prompt_tokens") or 0)
             stat_obj["completion_tokens"] += (r.get("completion_tokens") or 0)
             stat_obj["reasoning_tokens"] += (r.get("reasoning_tokens") or 0)
@@ -2064,9 +1955,8 @@ def _scan_usage_log(state, offset, since=None, until=None, realm=None):
         feed(model_map[m_id]["all_time"], is_err)
         if in_window:
             feed(model_map[m_id]["window"], is_err)
-        # Per-key figures follow the same rule as per-model ones. A row
-        # written before the key_id field existed has nothing to attribute,
-        # and inventing an owner for it would be worse than leaving it out.
+        # Per-key figures follow the same rule as per-model ones; a row
+        # without a key_id has nothing to attribute and is left out.
         k_id = r.get("key_id") or ""
         if k_id:
             if k_id not in key_map:
@@ -2159,8 +2049,7 @@ def _usage_analytics_payload(state, realm, since, until):
     keys_list = sorted(key_map.values(), key=lambda k: (-k["window"]["total_tokens"], -k["all_time"]["total_tokens"]))
     return {
         # The resolved window travels with the payload so the page can label
-        # its first column from what the server actually applied, not from
-        # what the panel hoped it sent.
+        # its first column from what the server actually applied.
         "window": {"since": since, "until": until},
         "realm": realm or "all",
         "summary": {"window": window_summary, "all_time": all_summary},
@@ -2211,11 +2100,10 @@ def _day_start_series(first, last):
 def trend_axis(days=None, range=None, since=None, until=None):
     """Resolve /usage/trend's selector into (granularity, starts, since, until).
 
-    `starts` are the local bucket beginnings that get rendered, zero-filled,
-    and the returned bounds are exactly the ones the scan applies, so a caller
-    can label the chart from what the server actually did. days wins over
-    range when both are sent; "today" is hourly, everything else is daily;
-    an unknown or missing selector falls back to the dashboard's two weeks.
+    `starts` are the local bucket beginnings that get rendered, zero-filled;
+    the returned bounds are exactly the ones the scan applies. days wins over
+    range, "today" is hourly and everything else daily, and an unknown or
+    missing selector falls back to the dashboard's two weeks.
     """
     value = str(range or "").strip().lower()
     wanted = None
@@ -2261,10 +2149,10 @@ def _bucket_start(at, granularity):
 def _scan_usage_trend(state, offset, since, until, realm, granularity):
     """Fold the rows appended after `offset` into per-bucket counters.
 
-    The counters follow the analytics scan: a client's own cancellation is not
-    a consumed request, an error is an error, and the token / credit totals
-    follow actual consumption either way. The bucket shape is fixed, so a
-    later payload can render any window that falls inside what was folded.
+    The counters follow the analytics scan: a client cancellation is not a
+    consumed request, and token / credit totals follow actual consumption. The
+    bucket shape is fixed, so a later payload can render any window inside
+    what was folded.
     """
     buckets = state["buckets"]
 
@@ -2332,8 +2220,8 @@ def usage_trend(realm=None, days=None, range=None, since=None, until=None, ttl=N
     """Bucketed request/token trend, zero-filled and cached incrementally.
 
     One entry per (realm, granularity, window) folds the log forward from its
-    own cursor, the same pattern the analytics payload uses, so a poll costs
-    the bytes appended since the previous one instead of a rescan.
+    own cursor like the analytics payload, so a poll costs the bytes appended
+    since the previous one instead of a rescan.
     """
     ttl = _STATS_TTL if ttl is None else ttl
     granularity, starts, lo, hi = trend_axis(days=days, range=range,
@@ -2426,24 +2314,20 @@ def current_account():
 # ---------------------------------------------------------------------------
 # Prefix-based session affinity (PATCHED-BY-OPS)
 # ---------------------------------------------------------------------------
-# 上游 prompt cache 是【账号级】的：只有同一个账号再次看到相同前缀才会命中。
-# 实测证据（wk 实例 11 个号）：8 次完全相同的前缀请求被轮询分散到 8 个账号，
-# 缓存率全部为 0%；而带上会话标识固定命中同一账号时，第 2 次起缓存率即 95.2%。
+# 上游 prompt cache 是【账号级】的，只有同一个账号再次看到相同前缀才会命中。
+# 实测（wk 实例 11 个号）：8 次相同前缀被轮询分散到 8 个账号时缓存率全为 0%；
+# 带上会话标识固定命中同一账号后，第 2 次起缓存率 95.2%。
 #
-# sub2api / DSH 等客户端并不发送 X-Conversation-Id 之类的会话标识，
-# 于是 hub 走纯轮询，同一对话每一轮都换账号，缓存必然归零。
-#
-# 这里在缺少显式会话键时，用【对话稳定前缀】派生亲和键：
-# 取消息列表的前两条（system + 首条 user），它们在整段对话生命周期内不变，
-# 因此同一对话的每一轮都会命中同一账号；而不同对话的首条 user 不同，
-# 依旧会分散到各账号，负载均衡不受影响。
+# sub2api / DSH 等客户端不发送 X-Conversation-Id 之类的会话标识，hub 只能走
+# 纯轮询，同一对话每一轮都换账号。这里在缺少显式会话键时用【对话稳定前缀】
+# 派生亲和键：取消息列表的前两条（system + 首条 user），它们在整段对话生命
+# 周期内不变，不同对话的首条 user 不同，负载均衡不受影响。
 def derive_affinity_key(messages):
     """Derive a stable affinity key from a conversation's stable prefix.
-    The first two messages (system + first user turn) stay byte-identical for
-    the whole life of a conversation, so hashing them pins every later turn of
-    that conversation to the same upstream account - exactly what prompt
-    caching needs. Distinct conversations differ in their first user turn and
-    therefore still spread across the pool.
+
+    The first two messages stay byte-identical for the whole conversation, so
+    every later turn pins to the same upstream account, while distinct
+    conversations still spread across the pool.
     """
     try:
         msgs = messages or []
@@ -2456,8 +2340,9 @@ def derive_affinity_key(messages):
         return None
 def prompt_fingerprint(messages):
     """Privacy-safe fingerprint of the outgoing prompt.
+
     Cache hits need a byte-identical prefix, so these hashes answer "is my
-    prefix stable / is my conversation continuous?" without storing any text.
+    prefix stable / is my conversation continuous?" without storing text.
     """
     try:
         def h(obj):
@@ -2550,10 +2435,9 @@ def clear_logs():
 # ---------------------------------------------------------------------------
 # upstream helpers
 # ---------------------------------------------------------------------------
-#: Auxiliary models the API advertises but that are not usable for chat.
-#: "lite" backs internal helpers (title generation, compaction) and upstream
-#: rejects it with 11102; the codewise/completion entries are text-completion
-#: or IDE-inline models, not chat models.
+#: Auxiliary models the API advertises but that are not usable for chat:
+#: "lite" backs internal helpers and is rejected with 11102, and the
+#: codewise/completion entries are text-completion or IDE-inline models.
 # Exclude WorkBuddy virtual aliases / quick presets
 VIRTUAL_ALIAS_MODELS = {
     "default-model",
@@ -2616,8 +2500,7 @@ INTL_UI_ORDER = [
 def merge_catalog(primary, realm=None, extras=False):
     r = realm or CURRENT_REALM
     merged = {}
-    # "all" is the union of both realms. The analytics dashboard lists every
-    # model the gateway has served, so it must not drop the ones that only
+    # "all" is the union of both realms, so it must not drop the models only
     # one side's catalog knows about.
     if r == "all":
         source_static = list(wb_catalog.STATIC_INTL_MODELS) + list(wb_catalog.STATIC_CN_MODELS)
@@ -2625,8 +2508,7 @@ def merge_catalog(primary, realm=None, extras=False):
         source_static = getattr(wb_catalog, "STATIC_CN_MODELS" if r == "cn" else "STATIC_INTL_MODELS", wb_catalog.STATIC_MODELS)
     for item in source_static:
         mid = item.get("id")
-        # First catalog wins for a shared id, so the intl entry is not
-        # overwritten by its cn counterpart when both are merged.
+        # First catalog wins for a shared id, so intl is not overwritten by cn.
         if mid and is_chat_model(mid) and mid not in merged:
             merged[mid] = dict(item)
     for mid, meta in primary or []:
@@ -2649,9 +2531,9 @@ def merge_catalog(primary, realm=None, extras=False):
             out.append((mid, merged[mid]))
     if extras:
         # A model the curated table has never heard of still ships when the
-        # *live* catalogue lists it - that is how a newly added upstream model
-        # reaches /v1/models without a release. The bundled snapshot alone is
-        # not enough: it also carries legacy entries the picker may not show.
+        # live catalogue lists it, which is how a newly added upstream model
+        # reaches /v1/models without a release; the bundled snapshot also
+        # carries legacy entries the picker may not show.
         for mid, _meta in primary or []:
             if mid in merged and mid not in seen:
                 seen.add(mid)
@@ -2662,11 +2544,10 @@ _catalog_lock = threading.Lock()
 def fetch_models(realm=None, force=False):
     """(entries, info) for the realm's model list, merged with the bundled tables.
 
-    info["source"] says where the live catalogue came from: "server" (fetched
-    just now), "cache" (the saved server copy), "local" (the desktop app's own
-    files) or "bundled" (the shipped tables alone). info["fetched_at"] is when
-    the server last answered. The in-memory copy answers for 5 minutes; force
-    skips it.
+    info["source"] says where the live catalogue came from: "server", "cache",
+    "local" (the desktop app's own files) or "bundled"; info["fetched_at"] is
+    when the server last answered. The in-memory copy answers for 5 minutes,
+    force skips it.
     """
     r = realm or CURRENT_REALM
     with _lock:
@@ -2674,8 +2555,7 @@ def fetch_models(realm=None, force=False):
         if saved.get("data") and not force and time.time() - saved.get("at", 0) < 300:
             return saved["data"], saved["info"]
     # One upstream walk per realm even when several callers miss the cache at
-    # the same moment: a batch of /v1/models requests must not turn into a
-    # batch of upstream requests.
+    # the same moment, so a batch of /v1/models requests stays one fetch.
     with _catalog_lock:
         with _lock:
             saved = _models_cache.get(r) or {}
@@ -2696,10 +2576,10 @@ def fetch_models(realm=None, force=False):
         return entries, info
 def model_entry(mid, meta):
     """Build a rich /v1/models entry from the desktop app catalog metadata.
-    The OpenAI spec only names id/object/created/owned_by, so capability data is
-    convention-driven. Several shapes are emitted at once so that different
-    clients (OpenRouter-style, LobeChat-style, plain-flag readers) all find
-    what they look for.
+
+    The OpenAI spec only names id/object/created/owned_by, so capability data
+    is convention-driven and several shapes are emitted at once for the
+    different client conventions.
     """
     meta = meta or {}
     item = {
@@ -2720,15 +2600,10 @@ def model_entry(mid, meta):
     tools = bool(meta.get("supportsToolCall"))
     thinks = bool(meta.get("supportsReasoning"))
     inputs = ["text"] + (["image"] if vision else [])
-    # Capability flags under every spelling the common clients look for.
-    # /v1/models has no standard for this, so each convention is emitted at
-    # once rather than guessing which one a given client reads:
-    #   capabilities.vision      generic
-    #   supports_vision/images   LobeChat-style flat flags
-    #   vision                   Cherry Studio / NextChat style
-    #   abilities.vision         LobeChat
-    #   multimodal               misc
-    #   *_modalities             OpenRouter
+    # Capability flags under every spelling the common clients look for:
+    # capabilities / supports_* / vision / abilities / modalities. /v1/models
+    # has no standard for this, so each convention is emitted rather than
+    # guessing which one a given client reads.
     item["capabilities"] = {
         "vision": vision,
         "tool_calls": tools,
@@ -2796,8 +2671,7 @@ def model_entry(mid, meta):
 def read_product_config_models(realm=None):
     """Read the desktop app's cached catalog: [(id, meta), ...].
 
-    "all" reads both apps when they are installed, so the combined view gets
-    each side's metadata instead of only the domestic one.
+    "all" merges both apps' files when they are installed.
     """
     r = realm or CURRENT_REALM
     if r == "all":
@@ -2835,27 +2709,24 @@ def _read_product_config_dir(cache_dir):
         if isinstance(mid, str) and mid:
             out.append((mid, m))
     return out
-#: The desktop client's own product-config endpoint. The cache file that
-#: read_product_config_models() reads is this response written to disk, so
-#: calling it directly is what lets a machine without the desktop app
-#: (Docker, NAS, a headless server) advertise the live catalogue - live
-#: multipliers included - instead of the narrower endpoint or the bundled
-#: snapshot.
+#: The desktop client's own product-config endpoint; the cache file that
+#: read_product_config_models() reads is this response written to disk. Calling
+#: it directly lets a machine without the desktop app advertise the live
+#: catalogue instead of the narrower endpoint or the bundled snapshot.
 REMOTE_CONFIG_PATH = "/v3/config"
 
 #: Suffixes that mark a variant of a name the catalogue already carries: the
 #: regional build (deepseek-v4.1-flash-sg) and the experimental one (hy3-x).
-#: Measured on both exits: the plain name is the free (x0.00) one and the
-#: variant is the paid one, so the plain name is what gets advertised.
+#: On both exits the plain name is the free one, so that is what is advertised.
 VARIANT_SUFFIXES = ("-sg", "-x")
 
 
 def remote_config_headers(account, realm, ua=None):
     """Headers for the product-config call.
 
-    The UA decides which catalogue comes back and only the desktop UA returns
-    the full list (an unknown one is a hard 400, code 12403), so this uses a
-    realm's fixed desktop UA rather than the account's current identity.
+    The UA decides which catalogue comes back, only the desktop UA returns the
+    full list, and an unknown one is a hard 400 (code 12403), so a realm's
+    fixed desktop UA is used.
     """
     cfg = wb_accounts.get_realm_config(realm)
     return {
@@ -2871,9 +2742,9 @@ def remote_config_headers(account, realm, ua=None):
 def _agent_model_lists(payload):
     """Every agent's bare-string model list, cli-named agents first.
 
-    The catalogue the picker shows rides in agents[].models. The endpoint
-    answers with it under a "data" key while the desktop cache file is the
-    same document written to disk without that envelope, so both are read.
+    The catalogue rides in agents[].models; the endpoint answers under a "data"
+    key while the desktop cache file is the same document without it, so both
+    are read.
     """
     roots = [payload]
     data = payload.get("data")
@@ -2907,12 +2778,10 @@ def _agent_model_lists(payload):
 def parse_remote_catalog(payload):
     """(ids, meta) from a /v3/config response, or None when it carries none.
 
-    The picker's list rides in agents[].models as bare ids - under "data" in
-    the endpoint's answer, at the top level in the desktop cache file. The
-    per-model metadata (credits, limits, copy) lives in a separate models
-    array. An unusable credential answers HTTP 200 with an *empty* list, so
-    an empty catalogue is reported as None and the caller falls back instead
-    of publishing "this exit has no models".
+    The picker's list rides in agents[].models as bare ids, the per-model
+    metadata lives in a separate models array. An unusable credential answers
+    HTTP 200 with an empty list, so an empty catalogue is reported as None and
+    the caller falls back instead of publishing "this exit has no models".
     """
     if not isinstance(payload, dict):
         return None
@@ -2952,8 +2821,7 @@ def snapshot_credits():
     """id -> credits from the bundled catalogue (both realms, intl first).
 
     Used to answer "is there a free sibling?" for a variant the remote lists
-    but whose sibling it no longer does: the free hy4-preview-f, for example,
-    is what the cn picker keeps while the remote only names the paid one.
+    but whose sibling it no longer does.
     """
     return {mid: str(item.get("credits") or "").strip().lower()
             for mid, item in _snapshot_items().items()}
@@ -2977,11 +2845,9 @@ def curate_remote_catalog(realm, ids, meta=None):
       - virtual aliases (default-model ... auto) are not models;
       - "-sg" / "-x" builds are the paid variant of a name the list already
         carries;
-      - when a free ("x0.00") sibling exists, the free one is the one the
-        picker shows, so the paid sibling is dropped;
-      - everything else keeps its upstream order. Names the upstream does not
-        list at all stay available through the curated order tables and the
-        bundled snapshot, which merge_catalog() keeps.
+      - when a free ("x0.00") sibling exists, the paid sibling is dropped;
+      - everything else keeps its upstream order; names the upstream does not
+        list stay available through the order tables and the bundled snapshot.
     """
     snapshot = _snapshot_items()
     credits = {mid: str(item.get("credits") or "").strip().lower()
@@ -3023,10 +2889,9 @@ def curate_remote_catalog(realm, ids, meta=None):
 def fetch_remote_product_config(realm):
     """(ids, meta) from the realm's own product-config endpoint, or None.
 
-    At most two 10s attempts bound the wait: one per desktop UA, because the
-    endpoint sits behind the WAF where a dropped connection is normal, and
-    every caller has a fallback (the desktop cache file, the narrow model
-    endpoint, the bundled snapshot).
+    At most two 10s attempts bound the wait, one per desktop UA, because the
+    endpoint sits behind the WAF where a dropped connection is normal; every
+    caller has a fallback.
     """
     if realm not in ("intl", "cn") or POOL is None:
         return None
@@ -3168,8 +3033,7 @@ def store_catalog_cache(realm, ids, meta):
 def fetch_catalog_from_server(realm):
     """Ask the server for the realm's catalogue and save what came back.
 
-    Returns the merged (ids, meta), or None when the server gave nothing - no
-    usable account, a dropped connection, an empty payload.
+    Returns the merged (ids, meta), or None when the server gave nothing.
     """
     names = ("intl", "cn") if realm == "all" else (realm,)
     fetched = False
@@ -3208,15 +3072,13 @@ def _curated_from_legacy(realm):
 def catalog_entries(realm, force=False):
     """(entries, extras, source) for one exit, tried in preference order.
 
-    The server's catalogue is what the list comes from; every successful fetch
-    is saved and that copy answers for the next 24 hours, so a restart or a
-    burst of requests does not turn into a burst of upstream calls. A stale
-    copy is refreshed from the server, and when the server has nothing to give
-    the stale copy still answers; the desktop app's files and the shipped
-    tables are the last resorts.
+    A successful server fetch is saved and answers for the next 24 hours, so a
+    restart or a burst of requests does not become a burst of upstream calls; a
+    stale copy still answers when the server has nothing. The desktop app's
+    files and the shipped tables are the last resorts.
 
     extras says the entries came from a live catalogue, whose membership may
-    add a model the curated tables have never seen. The legacy reader keeps the
+    add a model the curated tables have never seen; the legacy reader keeps the
     old whitelist behaviour.
     """
     cache = read_catalog_cache()
@@ -3252,10 +3114,9 @@ def catalog_entries(realm, force=False):
 def seed_default_disabled(ids):
     """Switch off the models the curation rules drop, once per model.
 
-    A model the upstream lists but the served list drops (variant builds, paid
-    siblings of a free model) starts switched off in the panel. Recording it in
-    excluded_seen is what keeps the operator's "check it back on" from being
-    undone by the next load.
+    A model the upstream lists but the served list drops starts switched off in
+    the panel; recording it in excluded_seen keeps the operator's "check it
+    back on" from being undone by the next load.
     """
     seen = {m.strip().lower() for m in wb_settings.excluded_seen(ACCOUNTS_DIR)}
     fresh = [m for m in ids if m.strip().lower() not in seen]
@@ -3303,16 +3164,15 @@ def strip_data_prefix(line):
 class UpstreamStreamError(Exception):
     """The upstream cut a reply short: no terminal marker, or an error frame.
 
-    The streaming relays answer with their protocol's error event and the
-    non-streaming paths with 502, so a half answer is never passed off as a
-    finished one.
+    Streaming relays send their protocol's error event and non-streaming paths
+    answer 502, so a half answer is never passed off as a finished one.
     """
 def heartbeat_frame(raw):
     """The keep-alive comment in one upstream line, ready to forward, or None.
 
-    上游用 SSE 注释维持长静默的连接，有时直接发 ":" 开头的行，有时把它
-    包在 data: 里。对客户端两者是同一种东西，统一按注释转发，客户端自己的
-    空闲超时就不会在模型思考期间把连接掐掉。
+    上游用 SSE 注释维持长静默的连接，有时以 ":" 开头的行发出，有时包在
+    data: 里；统一按注释转发，客户端自己的空闲超时就不会在模型思考期间
+    把连接掐掉。
     """
     line = raw.decode("utf-8", "replace").strip()
     if not line:
@@ -3327,8 +3187,7 @@ def upstream_error_text(frame):
     """Describe the error one upstream SSE data frame carries, or None.
 
     上游报错有两种外形：OpenAI 的 {"error": {...}} 与它自己的
-    {"code": 6004, "msg": "..."}。带 choices 的帧是正常分片，不管里面
-    还有什么字段。
+    {"code": 6004, "msg": "..."}；带 choices 的帧是正常分片。
     """
     if not isinstance(frame, dict) or frame.get("choices"):
         return None
@@ -3358,9 +3217,8 @@ def clean_chunk(raw):
         delta = choice.get("delta")
         if not isinstance(delta, dict):
             continue
-        # PATCHED-BY-OPS: 原判断 `if not delta.get("function_call")` 对
-        # {"name":"","arguments":""} 为假（非空 dict 是真值），空占位删不掉。
-        # 改为显式检查：name 与 arguments 均空才视为占位噪音。
+        # PATCHED-BY-OPS: 空占位 {"name":"","arguments":""} 是非空 dict，布尔
+        # 判断为真删不掉，所以显式检查 name。
         fc = delta.get("function_call")
         if fc is not None:
             fc_empty = False
@@ -3403,8 +3261,8 @@ def _strip_empty_fc(obj):
     return changed
 def clean_responses_frame(frame):
     """PATCHED-BY-OPS: 清洗 Responses SSE 帧（bytes）。
-    输入 b'event: x\ndata: {...}\n\n'；只改写 data: 行的 JSON，
-    event: 行原样保留。解析失败原样返回（不破坏未知格式）。
+
+    只改写 data: 行的 JSON，event: 行原样保留；解析失败原样返回。
     """
     if not frame:
         return frame
@@ -3429,9 +3287,9 @@ def clean_responses_frame(frame):
     return ("\n".join(out) + "\n\n").encode("utf-8") if changed else frame
 def normalize_roles(messages):
     """Map role names the upstream rejects onto ones it accepts.
-    WorkBuddy only knows system / user / assistant / tool. OpenAI's newer
-    "developer" role (used by the Codex CLI and current SDKs) is the same thing
-    as "system", but sending it verbatim fails with code 11-128.
+
+    WorkBuddy only knows system / user / assistant / tool; OpenAI's newer
+    "developer" role means "system" but is rejected verbatim with code 11-128.
     """
     out = []
     for m in messages or []:
@@ -3470,12 +3328,11 @@ SANITIZE_REWRITES = (
 SANITIZE_HDR_RE = re.compile(r"(?i)x-anthropic-billing-header:[^;\r\n]*;?\s*")
 SANITIZE_BARE_HDR_RE = re.compile(r"(?i)x-anthropic-billing-header")
 SANITIZE_KV_RE = re.compile(r"(?i)\bcc_[a-z0-9_]+=[^;\r\n]*;?\s*")
-# WorkBuddy upstream returns 11128 ("Illegal API invocation from an unapproved
+# WorkBuddy upstream returns 11-128 ("Illegal API invocation from an unapproved
 # channel") when this exact OmO identity fingerprint appears as a contiguous
-# substring in a system message. A/B tests show the match is case-insensitive,
-# survives surrounding prefix/suffix text, and stops matching when the phrase
-# structure is changed. Rewrite only this confirmed fingerprint, leaving the
-# agent identity and behaviour intact while dropping the framework attribution.
+# substring in a system message. A/B tests show the match is case-insensitive
+# and survives surrounding text, so only this confirmed fingerprint is
+# rewritten, leaving the agent identity and behaviour intact.
 SANITIZE_OMO_JUNIOR_RE = re.compile(
     r"Sisyphus-Junior - Focused executor from OhMyOpenCode", re.IGNORECASE
 )
@@ -3491,10 +3348,8 @@ def sanitize_text(text):
         return text
     if not has_fingerprint(text):
         return text
-    # Keep the rewrite deliberately narrow: do not globally remove
-    # "OhMyOpenCode" or "Sisyphus-Junior", because either token alone is
-    # accepted by the upstream. Only the confirmed contiguous fingerprint is
-    # neutralized.
+    # Keep the rewrite narrow: either token on its own is accepted by the
+    # upstream, so only the confirmed contiguous fingerprint is neutralized.
     text = SANITIZE_OMO_JUNIOR_RE.sub("Sisyphus-Junior - Focused executor", text)
     for old, new in SANITIZE_REWRITES:
         text = text.replace(old, new)
@@ -3560,11 +3415,9 @@ def repack_tool_result_blocks(messages):
     """Keep a tool_calls batch and its results adjacent.
 
     The upstream requires the role:"tool" results to follow the assistant
-    message that requested them with nothing in between. Codex's
-    image_resize_notice, for one, arrives as a developer message right after a
-    tool output; with parallel calls it lands between two results, the pairing
-    reads as broken and the upstream rejects the whole request (code 11148),
-    retiring the conversation. This only reorders: same results, same relative
+    message that requested them with nothing in between; a message landing
+    between two parallel results breaks the pairing and the whole request is
+    rejected with code 11148. This only reorders: same results, same relative
     order, the intruders moved behind the batch.
     """
     if not isinstance(messages, list) or len(messages) < 3:
@@ -3628,12 +3481,10 @@ def repack_tool_result_blocks(messages):
 def cleanup_orphan_tool_calls(messages):
     """Drop tool calls that have no result, and results that have no call.
 
-    A failed tool call (bad arguments, timeout, unknown tool) leaves the client
-    with an assistant tool_calls entry it can never answer: the result message
-    is never written, yet the entry rides along with the history on every later
-    turn and the upstream rejects each one (code 11148), so a single failed
-    call can retire a whole conversation. Both sides are trimmed against the
-    same set of ids, so no half-pairing can survive the repair.
+    A failed tool call leaves an assistant tool_calls entry that can never be
+    answered: the entry rides along with the history on every later turn and
+    each one is rejected with code 11148. Both sides are trimmed against the
+    same set of ids, so no half-pairing survives the repair.
     """
     if not isinstance(messages, list) or not messages:
         return messages, False
@@ -3689,18 +3540,15 @@ def cleanup_orphan_tool_calls(messages):
 # ---------------------------------------------------------------------------
 # DeepSeek Multi-turn Consistency: reasoning_content backfill
 # ---------------------------------------------------------------------------
-# Upstream (code 11155 "the reasoning content from the previous turn must be
-# passed back in thinking mode") requires every assistant message to carry a
+# Upstream (code 11155) requires every assistant message to carry a
 # `reasoning_content` string while thinking is on. Two halves gate the fix,
 # mirroring the official client's ReasoningContentBackfillRule:
 #   - thinkingEnabled: deepseek + thinking enabled -> always backfill, even
-#     when a third-party client dropped reasoning entirely (this was the bug:
-#     only the hasTrace half existed, so zero-trace histories were forwarded
-#     untouched and rejected).
+#     without a trace from the client;
 #   - hasTrace: any existing reasoning trace -> backfill regardless of the
 #     thinking flag.
-# Upstream also validates len(reasoning) > 0, so an empty placeholder is not
-# enough on its own: `reasoning` is mirrored with a non-empty value.
+# Upstream validates len(reasoning) > 0, so `reasoning` is mirrored with a
+# non-empty value.
 def backfill_reasoning_content(messages, model, thinking_enabled=None):
     if not model or not str(model).lower().startswith("deepseek"):
         return messages
@@ -3732,7 +3580,7 @@ def backfill_reasoning_content(messages, model, thinking_enabled=None):
                 item["reasoning_content"] = rc
             # Mirror onto `reasoning` with a non-empty value: upstream rejects
             # an empty/absent reasoning, while a whitespace placeholder passes
-            # its length check and carries no model-visible semantics.
+            # its length check.
             existing = item.get("reasoning")
             if not (isinstance(existing, str) and existing):
                 item["reasoning"] = rc if rc else " "
@@ -3750,30 +3598,18 @@ def normalize_tool_choice(obj):
     if isinstance(tc, str):
         val = tc.strip().lower()
         if val == "none":
-            # 这里曾经把 tools/functions 一起删掉，那正是 Agent 陷入无效循环的成因：
-            # 工具声明没了，模型拿不到函数签名、又没有结构化工具通道，却仍被要求
-            # 完成任务，于是把调用降级成 DSML / 伪 JSON 文本塞进 content
-            # （tool_calls 为空、finish_reason=stop）。客户端解析不到调用只能再
-            # 追问一轮，模型又重复一遍 "I'll do it"，上下文每轮 +2 条消息、token
-            # 线性膨胀，直到撑爆窗口或用户手动断开。
-            #
-            # tool_choice="none" 的语义是「本轮不许调用工具」，这层意思由
-            # tool_choice 字段本身表达就够了，不需要抹掉能力声明。
-            # 上游把 tool_choice 声明为 string（发对象会 11101），所以保持字符串
-            # 原样透传，同时保留 tools。
-            #
-            # 取舍：实测本上游并不真正遵守 tool_choice="none"（保留 tools 后它
-            # 仍返回 tool_calls）。但对比两条路 —— 删 tools 会让模型输出不可解析
-            # 的文本、Agent 原地空转；留 tools 则走正常 tool_calls 通道，客户端能
-            # 正常执行与回填 —— 后者明显更好。确实需要禁止调用时，客户端不传
-            # tools 即可。
+            # tool_choice="none" 的语义是「本轮不许调用工具」，由字段本身表达即可，
+            # 不能顺手把 tools 一起删掉：工具声明没了，模型会把调用降级成 DSML /
+            # 伪 JSON 文本塞进 content，客户端解析不到只能再追问，上下文每轮膨胀。
+            # 上游只认字符串（对象形式会 11101）；实测它并不真正遵守 "none"，
+            # 但保留 tools 走正常 tool_calls 通道，明显好于删掉后的空转。
             obj["tool_choice"] = "none"
         return
     if isinstance(tc, dict):
         typ = (tc.get("type") or "").strip().lower()
         if typ == "none":
-            # 同上：保留 tools 声明。上游只认字符串，对象形式必须降级成
-            # "none"，否则 11101。
+            # 同样保留 tools；上游只认字符串，对象形式必须降级成 "none"，
+            # 否则 11101。
             obj["tool_choice"] = "none"
         elif typ in ("auto", "required"):
             obj["tool_choice"] = typ
@@ -3851,22 +3687,15 @@ def translate_max_completion_tokens(obj):
 # ---------------------------------------------------------------------------
 # 模型封锁表
 #
-# 背景：客户端除了用户的对话，还会自己发背景请求（记忆整理、自动复核等）。
-# 这些请求不经过模型菜单，而是直接使用目录上的模型 ID，因此可能在用户
-# 没有实际操作时，用付费模型消耗额度。
-#
-# 对策（选用）：把要拒绝的模型填进 ALLOWED_MODELS / BANNED_SUBSTRING /
-#               EXTRA_BANNED；命中的请求在本机直接回 400，完全不碰上游。
-#               默认全部为空 = 不封锁任何模型，行为与原版相同。
-#
-# 调整方式：
-#   要放行某个模型 -> 加进 ALLOWED_MODELS 或 ALLOWED_PREFIXES
-#   要连非 gpt 的模型一起挡 -> 加进 EXTRA_BANNED
+# 客户端除了用户的对话，还会自己发背景请求（记忆整理、自动复核等），这些请求
+# 不经过模型菜单，可能直接用目录上的付费模型消耗额度。要拒绝的模型填进
+# ALLOWED_MODELS / BANNED_SUBSTRING / EXTRA_BANNED，命中的请求在本机直接回
+# 400，完全不碰上游；三项默认全空，即不封锁任何模型。
 # ---------------------------------------------------------------------------
 
-# 允许放行的模型（你要用的）
+# 允许放行的模型
 ALLOWED_MODELS = {
-    # 默认不封锁任何模型；填入模型 id 即可只放行这些
+    # 填入模型 id 即可只放行这些；留空表示不封锁
 }
 
 # 允许前缀：涵盖 -high / -preview / [1M] 等变体
@@ -3875,16 +3704,15 @@ ALLOWED_PREFIXES = ()
 # 封锁字符串：模型名里含这个就拒绝
 BANNED_SUBSTRING = ""
 
-# 额外封锁的内部模型（不在 gpt- 前缀内，但也会烧点）
+# 额外封锁的内部模型（不在 gpt- 前缀内）
 EXTRA_BANNED = set()
 
 
 def is_model_banned(model):
     """True 表示这个模型名不该被送去上游。
 
-    规则：ALLOWED_MODELS / ALLOWED_PREFIXES 命中就放行；其余只要命中
-    BANNED_SUBSTRING 或 EXTRA_BANNED 就拒绝，没命中则照常送往上游。
-    三个设置默认都是空的，所以默认不封锁任何模型。
+    ALLOWED_MODELS / ALLOWED_PREFIXES 命中就放行；其余命中 BANNED_SUBSTRING
+    或 EXTRA_BANNED 就拒绝。三项设置默认全空，即不封锁任何模型。
     """
     if not model:
         return False
@@ -3894,7 +3722,6 @@ def is_model_banned(model):
         return False
     if any(m.startswith(a) for a in ALLOWED_PREFIXES):
         return False
-    # 命中封锁字符串就拒绝
     if BANNED_SUBSTRING and BANNED_SUBSTRING in m:
         return True
     # 其他已知会烧点的内部模型
@@ -3907,13 +3734,9 @@ def is_model_banned(model):
 # 背景请求拦截
 #
 # Codex App 除了用户的对话，还会自己发背景请求（记忆整理、环境建议、自动复核…）。
-# 这些请求不经过模型菜单，所以单靠模型白名单挡不住 —— 它们可能直接用目录上
-# 的付费模型（例如 gpt-6-astra 这类），在用户没有实际操作时照样消耗额度。
-#
-# Codex 会在 client_metadata 里带 x-codex-turn-metadata，内容像：
-#   {"request_kind":"memory","thread_source":"memory_consolidation",
-#    "turn_trigger":"memory_consolidation"}
-# 这里就靠这个标记判断：命中背景关键字 -> 本地直接拒绝，不碰上游、不扣点。
+# 这些请求不经过模型菜单，可能直接用目录上的付费模型，在用户没有实际操作时照样
+# 消耗额度。Codex 会在 client_metadata 里带 x-codex-turn-metadata 标记，这里
+# 就靠它判断：命中背景关键字 -> 本地直接拒绝，不碰上游、不扣点。
 # ---------------------------------------------------------------------------
 
 # 要不要拦截背景请求（False = 全部放行，维持原行为）
@@ -3937,11 +3760,10 @@ BACKGROUND_TRIGGER_KEYWORDS = (
 )
 
 
-# Thread sources that belong to a job the client started on its own. A
+# Thread sources that belong to a job the client started on its own: a
 # compaction request carries one of these when the client triggered it, and the
-# user's own thread when the operator pressed "compact the context" - so the
-# source has to be read before the keyword list, where "compaction" matches
-# both and would otherwise refuse the button.
+# user's own thread when the operator pressed "compact the context". The source
+# has to be read before the keyword list, where "compaction" matches both.
 BACKGROUND_THREAD_SOURCES = (
     "memory_consolidation",
     "memory",
@@ -3956,9 +3778,8 @@ BACKGROUND_THREAD_SOURCES = (
 def turn_metadata_fields(payload):
     """Flatten the request_kind / turn_trigger / thread_source hints we get.
 
-    Codex sends them either as plain client_metadata keys or as a JSON string
-    under a metadata key of its own, so both shapes are read. Returns {} when
-    the payload carries none of them.
+    Codex sends them as plain client_metadata keys or as a JSON string under a
+    metadata key of its own, so both shapes are read; {} when none are there.
     """
     if not isinstance(payload, dict):
         return {}
@@ -3966,8 +3787,8 @@ def turn_metadata_fields(payload):
     if not isinstance(meta, dict):
         return {}
 
-    # 内嵌 JSON 里的 kind / trigger / source 是同一组字段的短名，收集时就
-    # 归一成长名，拦截判断与压缩豁免读到的是同一份数据
+    # 内嵌 JSON 里的 kind / trigger / source 是同一组字段的短名，收集时归一成
+    # 长名，拦截判断与压缩豁免读到同一份数据
     aliases = {"request_kind": "request_kind", "turn_trigger": "turn_trigger",
                "thread_source": "thread_source", "kind": "request_kind",
                "trigger": "turn_trigger", "source": "thread_source"}
@@ -3991,9 +3812,8 @@ def is_compaction_request(payload):
     """True for the operator's own "compact the context" request.
 
     request_kind=compaction carries the same word as the background keyword, but
-    this request is one the user asked for: the client sends it on the user's
-    thread, while a compaction the client started by itself names the job that
-    started it. Refusing this one takes the context-compaction button away.
+    this one runs on the user's thread, while a compaction the client started by
+    itself names the job that started it; refusing it takes the button away.
     """
     fields = turn_metadata_fields(payload)
     kind = str(fields.get("request_kind") or "").strip().lower()
@@ -4071,9 +3891,8 @@ def parse_test_model(value):
 
     An empty string clears the setting, which restores the default. The id
     reaches the account's upstream verbatim, so anything that is not an
-    upstream-style model name (letters, digits, dot, hyphen, underscore) is
-    refused here instead of burning the account's own quota on a call that can
-    only come back 400.
+    upstream-style model name is refused here instead of burning the account's
+    quota on a call that can only come back 400.
     """
     if isinstance(value, bool) or not isinstance(value, str):
         return None, "test_model must be a model id string"
@@ -4087,7 +3906,7 @@ def parse_test_model(value):
 def parse_disabled_models(value):
     """Validate a /settings/save disabled_models; returns (ids, error).
 
-    The panel sends the ids of the models it left unchecked. Anything that is
+    The panel sends the ids of the models it left unchecked; anything that is
     not an upstream-style model id is refused, so a stray value cannot switch
     off a model by accident.
     """
@@ -4121,9 +3940,8 @@ def parse_messages_format(value):
 
 def build_upstream_body(payload):
     model = payload.get("model") or ""
-    # Resolve the effective thinking state before the backfill below: while
-    # thinking is on, the upstream requires reasoning_content on every
-    # assistant message, whether or not the client kept a reasoning trace.
+    # Resolve the effective thinking state before the backfill: with thinking
+    # on, the upstream requires reasoning_content on every assistant message.
     thinking = payload.get("thinking")
     thinking_type = ""
     if isinstance(thinking, dict):
@@ -4144,17 +3962,15 @@ def build_upstream_body(payload):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
     body = dict(payload)
     # Private request markers ride along on the chat body for the Responses
-    # path (the namespace map, the local-web-tools flag). They are not part of
-    # the upstream protocol, so drop them here rather than trusting the
-    # upstream to ignore unknown keys.
+    # path; they are not part of the upstream protocol, so they are dropped
+    # here rather than trusting the upstream to ignore unknown keys.
     for _marker in [k for k in body if str(k).startswith("_")]:
         body.pop(_marker, None)
     # dict(payload) 会把原始模型名一起带过去，所以别名要在这里覆盖回去
     body["model"] = model
     body["messages"] = messages
-    # Repair tool-call pairing before the body leaves: a call whose result never
-    # came back, or results split from their batch by an interleaved message,
-    # makes the upstream reject every later turn of that conversation.
+    # Repair tool-call pairing before the body leaves: an unanswered call or a
+    # result split from its batch makes the upstream reject every later turn.
     repaired, _repacked = repack_tool_result_blocks(body["messages"])
     repaired, _cleaned = cleanup_orphan_tool_calls(repaired)
     body["messages"] = repaired
@@ -4163,11 +3979,10 @@ def build_upstream_body(payload):
     normalize_tools(body)
     # Thinking injection for DeepSeek models.
     #
-    # thinking.type=enabled on its own does not switch the reasoning trace on:
-    # the upstream still answers without one unless an effort level rides along.
-    # Measured against the live upstream on deepseek-v4.1-flash, same prompt:
-    #   enabled + no effort   -> reasoning_tokens 0,  reasoning_content len 0
-    #   reasoning_effort=high -> reasoning_tokens 37, reasoning_content len 117
+    # thinking.type=enabled alone does not switch the reasoning trace on; the
+    # upstream still answers without one unless an effort level rides along.
+    # Measured on deepseek-v4.1-flash with the same prompt: enabled with no
+    # effort gives 0 reasoning tokens, reasoning_effort=high gives 37.
     # The client's own choice always wins; an effort level is only filled in
     # when it left the field out, and never for a request that opted out.
     if str(model).lower().startswith("deepseek"):
@@ -4190,13 +4005,11 @@ def model_reasoning_meta(model):
     """The catalog's reasoning block for a model, or {}.
 
     Read from the same merged catalog that /v1/models advertises, so what a
-    request reports cannot disagree with what the model list promised the
-    client. Failures fall back to {} (callers use their own default).
+    request reports cannot disagree with what the model list promised.
 
     Deliberately side-effect free: it reads the already-populated model cache
-    and the shipped static tables only. Calling fetch_models() here would let a
-    cold cache trigger an upstream discovery round-trip from inside request
-    handling, turning one chat call into a network fetch.
+    and the shipped static tables only, since calling fetch_models() here could
+    turn one chat call into an upstream discovery round-trip.
     """
     if not model:
         return {}
@@ -4225,9 +4038,8 @@ def model_fixed_effort(model):
     """The effort the catalog pins a model to, or None when it is selectable.
 
     reasoning.effort without supportedEfforts means the model always runs at
-    that level: /v1/models advertises it as reasoning_fixed_effort and the
-    picker offers no choice for it, so an effort the request carries anyway does
-    not change what ran.
+    that level, so an effort the request carries anyway does not change what
+    ran.
     """
     effort = model_reasoning_meta(model).get("effort")
     return effort.strip() if isinstance(effort, str) and effort.strip() else None
@@ -4236,10 +4048,9 @@ def model_fixed_effort(model):
 def client_effort_of(body):
     """The effort the request itself carries, under either client spelling.
 
-    build_upstream_body() reads both "reasoning_effort" and "reasoningEffort",
-    and only fills in the model default for the models it injects for - so a
-    camelCase request keeps the camelCase key, and a request to a model the
-    catalog pins to one level carries no effort at all.
+    build_upstream_body() only fills in a model default for the models it
+    injects for, so a camelCase request keeps the camelCase key and a request
+    to a pinned model may carry no effort at all.
     """
     if not isinstance(body, dict):
         return None
@@ -4252,17 +4063,15 @@ def upstream_effort_of(body, model=None):
 
     Resolved the way the upstream will apply it:
 
-      - a model the catalog pins to one level (reasoning.effort, no
-        supportedEfforts) always runs there: the picker offers no choice for it,
-        so a value the request carries anyway does not change the answer;
+      - a model the catalog pins to one level always runs there, whatever the
+        request carries;
       - a request that switched thinking off, or asked for "none", ran without
-        reasoning and nothing below overrides that;
+        reasoning;
       - otherwise the client's own value wins, under either spelling;
       - otherwise the model's declared defaultEffort applies.
 
-    Reading the body alone is not enough for the last two: the gateway only
-    writes an effort into the body for the models it injects for, so a plain
-    request to a pinned model would otherwise be reported as "no effort".
+    Reading the body alone is not enough, because the gateway only writes an
+    effort into the body for the models it injects for.
     """
     given = client_effort_of(body)
     if model:
@@ -4283,13 +4092,11 @@ def upstream_effort_of(body, model=None):
 def prompt_cache_key_enabled():
     """Whether to inject prompt_cache_key into outbound requests.
 
-    Off by default. The upstream turns out to cache repeated prefixes on its
-    own: with an identical ~8k-token prefix sent twice, the second call already
-    reports prompt_cache_hit_tokens=9600 and the same credit with or without
-    this field, on both exits (www.workbuddy.ai and copilot.tencent.com) and on
-    both a free and a billed model. Injecting it changed neither the hit rate
-    nor the charge, so it is left as an opt-in for experimenting rather than
-    added to every request.
+    Off by default. The upstream caches repeated prefixes on its own: an
+    identical ~8k-token prefix sent twice already reports
+    prompt_cache_hit_tokens and the same credit with or without this field, on
+    both exits and on both a free and a billed model, so injecting it is left
+    as an opt-in for experimenting.
     """
     return os.environ.get("WB_PROMPT_CACHE_KEY", "0").strip().lower() in (
         "1", "true", "yes", "on")
@@ -4300,13 +4107,12 @@ def inject_prompt_cache_key(body, uid, conversation):
 
     Kept for experimentation only: measurement on this upstream showed the
     prefix cache working without it (see prompt_cache_key_enabled). The key
-    still carries the account uid, because the upstream cache is scoped per
-    account -- a key shared between accounts would let one account's request
-    read another's cached prefix, so this must never be made a fixed string.
+    carries the account uid, because the upstream cache is scoped per account
+    and a key shared between accounts would let one read another's cached
+    prefix, so this must never be made a fixed string.
 
-    Priority matches the client's intent: an explicit prompt_cache_key is never
-    overwritten; then the body's own conversation id; then the session key the
-    gateway resolved (header or conversation-prefix derived).
+    Priority: an explicit prompt_cache_key is never overwritten, then the
+    body's own conversation id, then the session key the gateway resolved.
     """
     if not isinstance(body, dict):
         return body
@@ -4328,8 +4134,8 @@ def inject_prompt_cache_key(body, uid, conversation):
 class ContentRejected(Exception):
     """Upstream content review rejected this request (403 / code 11140).
 
-    Not an account problem: another credential gets the same 403 for the same
-    content, so it is passed straight through instead of cooling the pool.
+    Not an account problem: another credential gets the same 403, so it is
+    passed straight through instead of cooling the pool.
     """
 
     def __init__(self, http_error=None, detail=""):
@@ -4343,16 +4149,14 @@ class ContentRejected(Exception):
 
 
 class RateLimited(Exception):
-    """Upstream throttled this model (429 / code 6004). Distinct from a dead
-    pool: the credential is fine, only the model is cooling down for a while."""
+    """Upstream throttled this model (429 / code 6004). Distinct from an
+    unusable pool: the credential is fine, only the model is cooling down."""
 
     def __init__(self, http_error=None, detail="", wait=60, message=""):
         self.http_error = http_error
         self.detail = detail or ""
         self.wait = max(1, int(wait or 60))
-        # 429s answered without an upstream call (the pool is parked by the
-        # daily token guard) carry their own text instead of the upstream
-        # wording.
+        # 没有调用上游就返回的 429 由每日限额停用产生，使用自带文案，不用上游措辞。
         self.message = message or ""
         super().__init__("upstream rate limit: %s" % (self.detail[:200] or "429"))
 
@@ -4363,24 +4167,22 @@ class RateLimited(Exception):
 # 官方有三套身份（workbuddy / vscode / cli），端点与配额通道各不相同，
 # 对照表见 wb_identity._ENDPOINTS。
 #
-# 某模型在某条通道被限流（429 / code 6004）时，换成另一套身份通常还能继续
-# 用 —— 那是另一条配额线。每轮最多切 MAX_PRODUCT_SWITCHES 次，避免来回弹跳。
+# 某模型在某条通道被限流（429 / code 6004）时，换成另一套身份通常还能继续用，
+# 那是另一条配额线；每轮最多切 MAX_PRODUCT_SWITCHES 次，避免来回弹跳。
 #
-# 身份会写进凭证文件并在重启后读回（issue #76）：面板手动切换当下就写入文件，
+# 身份会写进凭证文件并在重启后读回（issue #76）：面板手动切换当下写入文件，
 # 这里的自动切换则在下一次任何 save() 时一并写入。
 #
-# 这个开关交给面板设置决定（issue #67），默认关闭：自动切换会吃掉重试预算，
-# 也会把账号留在操作者没主动选过的身份上，要用的话自己开。
+# 开关由面板设置决定（issue #67），默认关闭：自动切换会吃掉重试预算，也会把
+# 账号留在操作者没主动选过的身份上。
 # ---------------------------------------------------------------------------
 
 MAX_PRODUCT_SWITCHES = 4
 #: 瞬时故障（5xx、连接抖动、超时）先在同一个账号上重试几次再换号：换号会把
-#: 整段对话留在原账号的前缀缓存丢掉，重试本身就要在新账号上重算一次前缀。
-#: 429 / 401 / 403 不走这条路，那三个必须换号。
+#: 整段对话留在原账号的前缀缓存丢掉。429 / 401 / 403 不走这条路。
 TRANSIENT_SAME_ACCOUNT_RETRIES = 2
-#: 一次请求最多在原地重试几次。换号预算管的是「换过几个账号」，原地重试不占
-#: 用它，否则账号池小的时候会被原地重试吃光；但也不能不限，上游整体故障时
-#: 每次重试都要客户端多等一轮。
+#: 一次请求最多在原地重试几次。原地重试不占换号预算，否则账号池小的时候会被
+#: 它吃光；但也不能不限，上游整体故障时每次重试都要客户端多等一轮。
 MAX_TRANSIENT_SAME_ACCOUNT_RETRIES = 4
 _SWITCH_LOG = {}
 
@@ -4409,9 +4211,8 @@ def _switch_count(account, model):
 def _try_switch_product(account, model):
     """429 时换身份重试。返回 True 表示已切换、可以重试。
 
-    同一请求内最多切 MAX_PRODUCT_SWITCHES 次：
-      cli -> workbuddy -> cli -> workbuddy
-    四次都不行就放弃，让调用端回报真正的 429。
+    同一请求内最多切 MAX_PRODUCT_SWITCHES 次，用尽后放弃，让调用端回报
+    真正的 429。
     """
     count = _switch_count(account, model)
     if count >= MAX_PRODUCT_SWITCHES:
@@ -4457,9 +4258,9 @@ def retry_after_seconds(model, realm):
 def realm_model_throttled(realm, model):
     """True when accounts exist and are healthy but all are cooling this model.
 
-    Only a *model* cooldown counts. A plain account cooldown usually comes from
-    a transient network error, and reporting that as "rate limited" told
-    clients to back off from a model that was never throttled.
+    Only a model cooldown counts; a plain account cooldown usually comes from a
+    transient network error and must not tell clients to back off a model that
+    was never throttled.
     """
     if not POOL:
         return (False, 0)
@@ -4480,9 +4281,8 @@ def is_transient(exc):
     """Network-level flakiness that deserves a retry, not a cooldown.
 
     Upstream occasionally drops a TLS handshake mid-stream
-    (SSL: UNEXPECTED_EOF_WHILE_READING / Remote end closed connection).
-    Treating that as a dead account took the only intl account offline for 60s
-    and turned one hiccup into a 502 storm.
+    (SSL: UNEXPECTED_EOF_WHILE_READING / Remote end closed connection);
+    treating that as an unusable account turned one hiccup into a 502 storm.
     """
     t = ("%s %s" % (type(exc).__name__, exc)).lower()
     markers = (
@@ -4504,11 +4304,9 @@ _RESET_STAMP_RE = re.compile(
 def parse_rate_limit_reset(detail, retry_after=None):
     """429 之后账号对该模型恢复可用的时刻（epoch），说不出就返回 None。
 
-    code 6004 的 msg 两种语言都见过：
-      国内版 "…将在 2026-09-29 21:54:31 UTC+8 重置…"
-      国际版 "…your usage will reset at 2026-09-19 18:29:03 UTC+8…"
-    body 是 JSON 时只看 msg/message，免得把 requestId 之类的字段当成时间。
-    retry_after 是 HTTP Retry-After 头（秒数或 HTTP 日期），body 里没有时间才用它。
+    code 6004 的 msg 两种语言都见过，body 是 JSON 时只看 msg/message，免得把
+    requestId 之类的字段当成时间。retry_after 是 HTTP Retry-After 头（秒数或
+    HTTP 日期），body 里没有时间才用它。
     """
     text = detail or ""
     try:
@@ -4540,9 +4338,8 @@ def _retry_same_account(account, counters):
     """Count one retry on the same account; False once a budget is spent.
 
     两个上限：单个账号最多 TRANSIENT_SAME_ACCOUNT_RETRIES 次，整次请求最多
-    MAX_TRANSIENT_SAME_ACCOUNT_RETRIES 次。换号意味着把整段对话的前缀缓存
-    留在原账号上，重试本身要在新账号上重新算一次前缀，所以瞬时故障先原地
-    重试，只有确实重试不动了才换号。
+    MAX_TRANSIENT_SAME_ACCOUNT_RETRIES 次。瞬时故障先原地重试，重试不动了
+    才换号，避免把整段对话的前缀缓存留在原账号上。
     """
     if account is None:
         return False
@@ -4600,13 +4397,12 @@ class SlotLease(object):
 
 
 def open_upstream(payload, session_key=None, target_realm=None, only_uid=None, *, lease):
-    # Refresh the daily token guard before picking. The scan underneath is
-    # incremental and TTL-cached, so this is a stat() plus a cached dict on
-    # the hot path, and an account parked by the guard is skipped like any
-    # other unusable one.
+    # Refresh the daily token guard before picking: the scan underneath is
+    # incremental and TTL-cached, and an account parked by the guard is skipped
+    # like any other unusable one.
     apply_daily_token_limit()
-    # 评分分配要用近期的积分消耗速度：与每日限额共用同一份增量折叠，开关
-    # 关掉时这一步整个跳过。
+    # 评分分配要用近期的积分消耗速度，与每日限额共用同一份增量折叠，开关关闭
+    # 时整个跳过。
     apply_routing_inputs()
     realm = target_realm or detect_model_realm(payload.get("model")) or CURRENT_REALM
     model = str(payload.get("model") or "")
@@ -4622,8 +4418,7 @@ def open_upstream(payload, session_key=None, target_realm=None, only_uid=None, *
     total = max(1, POOL.count_ready(realm, model=model)) if POOL else 1
     tried = set()
     # 换号时不主动解绑：绑定留在原账号上，下一轮取号把这个账号排除在外，
-    # 账号池自己按「换号」记账并重新绑定。原地重试（同账号换身份、5xx 重试、
-    # tried 清空后的重来）因此仍然记成命中，只有真的换了账号才记成换号。
+    # 账号池自己按「换号」记账并重新绑定。原地重试因此仍记成命中。
     last_error = None
     last_uid = None
     last_429 = None
@@ -4636,11 +4431,10 @@ def open_upstream(payload, session_key=None, target_realm=None, only_uid=None, *
     # settings read on every retry would be pure overhead.
     auto_switch = auto_switch_product_enabled()
     max_attempts = max(2, total) + 1 + (MAX_PRODUCT_SWITCHES if auto_switch else 0)
-    # 原地重试不占换号预算：预算管的是「换过几个账号」。加上它的上限，小账号池
-    # 才不会在轮到下一个账号之前就把循环用完。
+    # 原地重试不占换号预算，加上它的上限，小账号池才不会在轮到下一个账号之前
+    # 就把循环用完。
     max_attempts += MAX_TRANSIENT_SAME_ACCOUNT_RETRIES
     for _attempt in range(max_attempts):
-        # 名额满的账号与冷却一样被跳过，换下一个账号。
         if only_uid:
             account = POOL.get(only_uid) if POOL else None
             if account is not None and (account.uid in tried or account.realm != realm
@@ -4665,9 +4459,8 @@ def open_upstream(payload, session_key=None, target_realm=None, only_uid=None, *
         last_uid = account.uid
         try:
             chat_url = account.chat_base_url() + CHAT_PATH
-            # The cache key is account scoped, so it is rebuilt per candidate rather
-            # than once up front. Opt-in only: measurement showed the upstream
-            # caches prefixes without it (see prompt_cache_key_enabled).
+            # The cache key is account scoped, so it is rebuilt per candidate;
+            # opt-in only (see prompt_cache_key_enabled).
             if prompt_cache_key_enabled():
                 attempt_body = inject_prompt_cache_key(upstream_body, account.uid, session_key)
             else:
@@ -4683,8 +4476,8 @@ def open_upstream(payload, session_key=None, target_realm=None, only_uid=None, *
             account.clear_error(model=model)
             reset_switch_counter(account, model)
             lease.keep(account, model)
-            # 第三个元素是这次请求实际使用的推理档位：请求体在每次尝试里都会
-            # 重新组装，档位却只由模型与请求本身决定，调用方把它写进用量流水。
+            # 第三个元素是这次请求实际使用的推理档位，由模型与请求本身决定，
+            # 调用方把它写进用量流水。
             return resp, account, upstream_effort_of(upstream_body, model)
         except urllib.error.HTTPError as exc:
             lease.drop(account, model)
@@ -4700,8 +4493,8 @@ def open_upstream(payload, session_key=None, target_realm=None, only_uid=None, *
                 account.note_error("HTTP 429 (model throttled)", model=model, until=reset_at,
                                    cooldown=wait)
                 if auto_switch and _try_switch_product(account, model):
-                    # 换了身份就等于换了一条配额线：要把它从「已试过」拿掉，
-                    # 并清掉刚刚记下的模型冷却，否则下一轮循环会找不到账号。
+                    # 换了身份等于换了一条配额线：从「已试过」拿掉并清掉刚记下的
+                    # 模型冷却，否则下一轮循环会找不到账号。
                     tried.discard(account.uid)
                     try:
                         account.clear_error(model=model)
@@ -4833,8 +4626,8 @@ def estimate_tokens(text):
 def aggregate_stream(raw_iter, model, resp_id):
     """Fold an SSE stream into one non-streaming chat.completion object.
 
-    上游的错误帧与缺少结束标记的提前 EOF 抛 UpstreamStreamError：调用方
-    回 502，客户端要的是完整回答时不会收到一段断掉的正文。
+    上游的错误帧与缺少结束标记的提前 EOF 抛 UpstreamStreamError：调用方回
+    502，客户端不会收到一段断掉的正文。
     """
     content, reasoning, finish = [], [], "stop"
     tool_calls_map = {}
@@ -4899,9 +4692,8 @@ def aggregate_stream(raw_iter, model, resp_id):
                         entry["function"]["arguments"] = (entry["function"]["arguments"] or "") + fn_args
             fc = delta.get("function_call")
             # PATCH2-BY-OPS: 上游会在流末尾发 function_call:{"name":"","arguments":""}
-            # 占位。原判断对空 dict 成立，会凭空生成 tool_call 并伪造 id，
-            # 导致 finish_reason 被改成 "tool_calls"（参数全空）→ 严格客户端会一直等待。
-            # 故：只要 name 为空即视为无效占位直接跳过。
+            # 占位；只要 name 为空就视为无效占位直接跳过，否则会凭空生成
+            # tool_call 并把 finish_reason 置为 "tool_calls"，严格客户端会一直等待。
             fc_is_empty = (not isinstance(fc, dict)) or (not fc.get("name"))
             if fc and isinstance(fc, dict) and not fc_is_empty:
                 idx = 0
@@ -4928,8 +4720,8 @@ def aggregate_stream(raw_iter, model, resp_id):
     message = {"role": "assistant", "content": "".join(content)}
     if reasoning:
         message["reasoning_content"] = "".join(reasoning)
-    # PATCH2-BY-OPS: 二次防御——剔除「无函数名且无参数」的空 tool_call。
-    # 即使上游以 tool_calls 数组形式发空占位，也不会泄漏给客户端。
+    # PATCH2-BY-OPS: 二次防御，剔除无函数名的空 tool_call，即使上游以
+    # tool_calls 数组形式发空占位也不会泄漏给客户端。
     if tool_calls_map:
         tool_calls_map = {
             k: v for k, v in tool_calls_map.items()
@@ -5034,19 +4826,14 @@ def _flatten_content(content):
 # ---------------------------------------------------------------------------
 # Responses API "custom" (freeform) tools
 #
-# Some clients - most notably Codex 0.15x - declare their file-editing tool as a
-# *custom* (freeform) tool rather than a JSON-schema function:
-#
-#     {"type": "custom", "name": "apply_patch", "format": {...grammar...}}
-#
-# and expect the model to answer with a custom_tool_call item carrying the raw
-# payload in "input", then feed the result back as custom_tool_call_output.
-#
-# The upstream chat endpoint has no notion of custom tools, so we downgrade them
-# to ordinary function tools with a single "input" string parameter on the way
-# out, and re-inflate them to custom_tool_call on the way back. Without this the
-# tool is silently ignored: the model emits the payload as ordinary prose and the
-# client never sees a tool call (measured: 52 text deltas, 0 tool items).
+# Codex 0.15x declares its file-editing tool as a custom (freeform) tool with a
+# grammar rather than a JSON-schema function, and expects a custom_tool_call item
+# carrying the raw payload in "input", with the result fed back as
+# custom_tool_call_output. The upstream chat endpoint has no notion of custom
+# tools, so they are downgraded to function tools with a single "input" string
+# parameter and re-inflated on the way back; without this the tool is silently
+# ignored and the client never sees a tool call (measured: 52 text deltas,
+# 0 tool items).
 # ---------------------------------------------------------------------------
 
 CUSTOM_TOOL_HINT = (
@@ -5063,9 +4850,9 @@ def _is_custom_tool(tool):
 def custom_tool_names(tools):
     """Names of tools declared as freeform/custom in a Responses request.
 
-    Custom tools declared inside a namespace count too: expand_namespace_tools()
-    keeps them in the flat list, so their calls come back and must be turned
-    into custom_tool_call items like the top-level ones.
+    Tools nested in a namespace count too: expand_namespace_tools() keeps them
+    in the flat list, so their calls must come back as custom_tool_call items
+    like the top-level ones.
     """
     flat, _mapping = expand_namespace_tools(tools)
     return {str(t["name"]) for t in flat if _is_custom_tool(t) and t.get("name")}
@@ -5098,19 +4885,9 @@ def _downgrade_custom_tool(tool):
 # ---------------------------------------------------------------------------
 # namespace 工具：展开 + 还原
 #
-# 新版 Codex App 把 MCP／外挂工具用 namespace 形式送出：
-#   {"type":"namespace","name":"codex_app","tools":[{name:"list_threads",...}]}
-#
-# 上游 Chat Completions 只认 flat function，看不懂 namespace。
-# 但 App 回程是用 (name, namespace) 两个字段找执行器 ——
-# 只给 flat name，App 一律回 "unsupported call"（实测 js / list_threads 全灭）。
-#
-# 三件事：
-#   1. Expand   送上游前把 namespace 展开成 flat function，记住 name -> namespace
-#   2. Normalise 模型返回的 name 可能是 js / ns__js / ns::js，都要能解析
-#   3. Restore   回程的 function_call / custom_tool_call 补上 namespace 栏位
-#
-# 参考：某开源 CodeBuddy/WorkBuddy 反向代理项目的 tool-namespaces 说明
+# Codex App 把 MCP／外挂工具用 namespace 形式送出，上游只认 flat function；
+# App 回程要用 (name, namespace) 两个字段找执行器，只给 flat name 一律回
+# "unsupported call"。展开、解析、还原三步由下面三个函数完成。
 # ---------------------------------------------------------------------------
 
 NAMESPACE_MAX_DEPTH = 4
@@ -5122,7 +4899,6 @@ def expand_namespace_tools(tools, _depth=0):
 
       * 子工具可能在 tools / children / functions 任一栏位
       * namespace 子工具常常没有 type 字段，展开时补成上游认得的 flat function
-      * custom / web_search 等非 function 项目原样留下，交给既有管线处理
       * 同名只留第一个
       * 返回 (flat_tools, name_to_namespace)
     """
@@ -5275,21 +5051,16 @@ def _unwrap_custom_input(args):
 # The gateway can run web_search / web_fetch itself; the panel switch decides.
 #
 # Some clients (Codex App and similar harnesses) declare web_search as a
-# server-side tool, but the upstream has no executor for it: forwarding the
-# declaration leaves the model answering as if no tool had been offered. With
-# the switch on, the gateway swaps the declaration for a function of its own,
-# swallows the calls and runs them locally (wb_webtools), then feeds the
-# results back.
+# server-side tool, but the upstream has no executor for it. Off by default the
+# declaration is forwarded untouched and the client's own search tool receives
+# the call; with the switch on it is swapped for a function of the gateway's
+# own, whose calls are swallowed, run locally (wb_webtools) and fed back.
 #
-# Off by default: the declaration is forwarded untouched and a client that
-# declares its own search tool receives the call - the behaviour since v1.5.3.
 # Turning it on means the gateway itself fetches URLs a model asks for, so the
 # egress policy is the operator's call.
 def local_web_tools_enabled():
-    """Panel switch: does this gateway run web_search / web_fetch itself?
-
-    Read per request, so flipping the panel takes effect on the next one
-    without a restart.
+    """Panel switch: does this gateway run web_search / web_fetch itself? Read
+    per request, so flipping the panel takes effect without a restart.
     """
     try:
         return wb_settings.local_web_tools(ACCOUNTS_DIR) is True
@@ -5310,8 +5081,7 @@ def web_tools_active(body):
 def sum_usage(total, part):
     """把一轮的 token 用量累加起来。
 
-    代跑网络工具会多跑好几次上游，那些 token 是真的花掉的，所以记帐要加总，
-    不能让最后一轮盖掉前面几轮。
+    代跑网络工具会多跑几次上游，那些 token 确实花掉了，不能让最后一轮盖掉前面几轮。
     """
     if not isinstance(part, dict):
         return total
@@ -5393,10 +5163,8 @@ def follow_up_with_tool_results(internal_calls, holder, model, session_key, t_st
     返回的三元组与 open_upstream() 一致：上游响应、账号、本次请求实际使用的
     思考档位（网络工具的往返不改变档位，调用方照旧记在用量行上）。
 
-    drop_tools=True 表示这是最后一轮：把网络工具从工具清单收回，模型没有东西
-    可以再调用，只能用手上的结果把话讲完。旧版在回合用尽时合成一个
-    resp_wrapup（status=completed、output=[]）收尾，那等于把失败伪装成正常
-    结束，客户端看到的就是「讲到一半断掉」——issue #43。
+    drop_tools=True 表示这是最后一轮：网络工具从工具清单收回，模型只能用手上
+    的结果把话讲完。收尾不要合成假的完成事件，见 issue #43。
     """
     convo = holder.get("convo_messages")
     if convo is None:
@@ -5447,9 +5215,8 @@ def follow_up_with_tool_results(internal_calls, holder, model, session_key, t_st
 def internal_calls_from_chat(chat_obj, web_tools=False):
     """Calls in an aggregated chat completion the gateway runs itself.
 
-    Only a request whose definitions the gateway injected can carry such a
-    call; with the switch off a client's own same-named function stays the
-    client's, so this answers empty.
+    Only a request whose definitions the gateway injected can carry one; see
+    web_tools_active. With the switch off the answer is empty.
     """
     message = ((chat_obj.get("choices") or [{}])[0] or {}).get("message") or {}
     out = []
@@ -5496,9 +5263,9 @@ def _responses_input_to_messages(payload):
                     role = item.get("role") or "user"
                     if role == "developer":
                         role = "system"
-                    # If this is assistant text and the previous message is an assistant
-                    # message (e.g. from an adjacent function_call), merge them so
-                    # tool_calls and text stay in one message without breaking tool sequence.
+                    # Assistant text is merged into a preceding assistant message
+                    # so tool_calls and text stay in one message without breaking
+                    # the tool sequence.
                     if role == "assistant" and messages and messages[-1].get("role") == "assistant":
                         prev = messages[-1]
                         if prev.get("content"):
@@ -5515,9 +5282,8 @@ def _responses_input_to_messages(payload):
                             pending_reasoning = ""
                         messages.append(msg_dict)
             elif itype == "reasoning":
-                # Reasoning item from previous assistant turn in Responses API.
-                # In standard Chat Completions, reasoning is either backfilled into
-                # the assistant message's reasoning_content or omitted.
+                # Reasoning item from a previous assistant turn, backfilled into
+                # the assistant message's reasoning_content.
                 r_text = ""
                 summ = item.get("summary")
                 if isinstance(summ, list):
@@ -5693,9 +5459,8 @@ def responses_to_chat(payload):
         flat_tools, ns_map = expand_namespace_tools(payload["tools"])
         chat["tools"] = _tools_for_chat(flat_tools)
         chat["_namespace_map"] = ns_map
-    # 客户端宣告 web_search / web_fetch 时，把那份宣告换成我们的
-    # function（见 wb_webtools.install_tool_defs）。
-    # 看板开关关闭时原样透传，客户端自己的同名工具不受影响。
+    # 客户端宣告的 web_search / web_fetch 换成网关自己的 function
+    # （见 wb_webtools.install_tool_defs）。
     if local_web_tools_enabled():
         wants = wb_webtools.client_wants_web(payload.get("tools"))
         if wants["search"] or wants["fetch"]:
@@ -5725,14 +5490,10 @@ def _responses_usage(u):
 def chat_to_response(chat_obj, model, custom_names=None, request_meta=None, namespace_map=None, sources=None):
     """Fold a Chat Completions object into a Responses API response object.
 
-    custom_names is the set of tool names the client declared as freeform
-    ("custom"). Calls to those tools are re-inflated into custom_tool_call
-    items so clients such as Codex recognise them.
-
-    request_meta echoes the request-level capabilities (tools, tool_choice,
-    parallel_tool_calls) back on the response. They used to be hardcoded to
-    tools=[], tool_choice=auto and parallel_tool_calls=true, so a client that
-    asked for something else was told the opposite of what it requested.
+    custom_names holds the tool names the client declared as freeform ("custom");
+    their calls are re-inflated into custom_tool_call items. request_meta echoes
+    the request-level capabilities (tools, tool_choice, parallel_tool_calls)
+    back on the response.
     """
     custom_names = custom_names or set()
     choice = (chat_obj.get("choices") or [{}])[0]
@@ -5740,8 +5501,8 @@ def chat_to_response(chat_obj, model, custom_names=None, request_meta=None, name
     text = msg.get("content") or ""
     reasoning = msg.get("reasoning_content") or ""
     tool_calls = msg.get("tool_calls") or []
-    # DeepSeek DSML tool calls fallback: the markers sit inside the text, so
-    # they have to come out of it before the message item is built.
+    # DeepSeek DSML tool calls: the markers sit in the text and come out
+    # before the message item is built.
     dsml_calls = []
     if not tool_calls:
         parsed, clean_t = parse_dsml_tool_calls(text)
@@ -5756,9 +5517,8 @@ def chat_to_response(chat_obj, model, custom_names=None, request_meta=None, name
             "status": "completed",
             "summary": [{"type": "summary_text", "text": reasoning}],
         })
-    # The message item comes before the tool calls, matching the order the
-    # streaming path uses when the text arrives first, and the order the
-    # chat-completions pipeline puts its text and tool_use blocks in.
+    # The message item comes before the tool calls, as in the streaming and
+    # chat-completions pipelines.
     if text or not (reasoning or tool_calls or dsml_calls):
         output.append({
             "id": _new_id("msg_"),
@@ -5842,11 +5602,11 @@ def stream_responses_events(upstream, model, holder):
     ns_map = holder.get("namespace_map") or {}
     # 由反代代跑的网络工具调用，收集起来不转发给客户端
     _internal_calls = {}
-    # Only reach for same-named calls when this request's definitions were the
-    # gateway's own (see web_tools_active); otherwise they belong to the client.
+    # 定义由本网关注入的请求才拦同名调用，其余同名调用属于客户端，
+    # 判断见 web_tools_active
     _own_web_tools = web_tools_active(holder.get("base_body"))
     # Echo the request capabilities the client actually sent, same as the
-    # non-streaming path; these were hardcoded before.
+    # non-streaming path.
     meta = holder.get("request_meta") or {}
     def resp_obj(status):
         obj = {
@@ -5876,10 +5636,10 @@ def stream_responses_events(upstream, model, holder):
         body = json.dumps(data, ensure_ascii=False)
         return ("event: " + etype + chr(10) + "data: " + body + chr(10) + chr(10)).encode("utf-8")
     def fail_frame(message):
-        """The one event that ends a stream the upstream cut short.
+        """结束被上游截断的流的唯一事件。
 
-        带着已经产生的输出，状态写 failed：客户端据此把这条响应当失败处理，
-        不会把半段正文当成完整回答。已经发出去的内容不再重发。
+        带着已产生的输出、状态写 failed，客户端会把这条响应当失败处理，不会把
+        半段正文当成完整回答；已经发出去的内容不再重发。
         """
         final = resp_obj("failed")
         final["error"] = {"code": "upstream_stream_error", "message": message}
@@ -5893,7 +5653,6 @@ def stream_responses_events(upstream, model, holder):
             "summary": [{"type": "summary_text", "text": "".join(reason_parts)}],
         }
     def _annotations():
-        """引用来源：只认工具真的返回过的网址。"""
         try:
             return build_citations("".join(text_parts), holder.get("web_sources") or [])
         except Exception:
@@ -5907,8 +5666,8 @@ def stream_responses_events(upstream, model, holder):
                               "annotations": _annotations()}]
         return item
     def _finalize():
-        # Close out the stream: reasoning item, structured tool calls,
-        # DSML fallback, the message item and response.completed.
+        # Close out the stream: reasoning item, tool calls, message item,
+        # response.completed.
         nonlocal msg_index, text_buffer
         if reason_index is not None and outputs[reason_index] is None:
             full_r = "".join(reason_parts)
@@ -5961,7 +5720,6 @@ def stream_responses_events(upstream, model, holder):
                 "output_index": entry["output_index"],
                 "item": fc_item,
             })
-        # Flush remaining buffered text if any
         if text_buffer:
             calls_rem, clean_rem = parse_dsml_tool_calls(text_buffer)
             if calls_rem:
@@ -5974,7 +5732,7 @@ def stream_responses_events(upstream, model, holder):
                         "content_index": 0, "delta": clean_rem,
                     })
             text_buffer = ""
-        # 2. DSML fallback: emit buffered/parsed DSML tool calls if no structured tool_calls were emitted
+        # 2. DSML fallback: emit buffered/parsed DSML calls when no structured tool_calls were emitted
         full_text = "".join(text_parts)
         dsml_calls = dsml_tool_calls
         if not dsml_calls:
@@ -6022,17 +5780,16 @@ def stream_responses_events(upstream, model, holder):
                     "output_index": out_idx,
                     "item": fc_item,
                 })
-        # 这一轮如果有代跑的网络工具调用，就把完成事件留给下一轮，
-        # 否则客户端会以为整个回合已经结束（旧版是在回合用尽时补一个合成的
-        # resp_wrapup，那才是 issue #43 真正的病灶）。
+        # 这一轮如果有代跑的网络工具调用，完成事件留给下一轮，否则客户端会以为
+        # 整个回合已经结束；不要合成假的收尾事件代替真正的结束，见 issue #43。
         if _internal_calls:
             holder.setdefault("internal_calls", []).extend(
                 {"name": v["name"], "arguments": v["arguments"]}
                 for v in _internal_calls.values()
             )
             holder["suppress_completion"] = True
-            # 让 App 画出原生的「已搜索网络」卡片：对每个代跑的调用送出
-            # web_search_call 项目与生命周期事件。
+            # 每个代跑的调用补上 web_search_call 项目与生命周期事件，让 App
+            # 画出原生的「已搜索网络」卡片。
             for _v in _internal_calls.values():
                 _nm = str(_v.get("name") or "")
                 try:
@@ -6118,8 +5875,7 @@ def stream_responses_events(upstream, model, holder):
         if not holder.get("suppress_completion"):
             yield ev("response.completed", {"response": final})
 
-    # 只有第一轮开场。第二轮以后再送一次 response.created，客户端会
-    # 看到同一则响应被开了两次。
+    # 开场事件只在第一轮发，第二轮再发客户端会看到同一则响应被开了两次。
     if not holder.get("suppress_lifecycle"):
         yield ev("response.created", {"response": resp_obj("in_progress")})
         yield ev("response.in_progress", {"response": resp_obj("in_progress")})
@@ -6170,7 +5926,7 @@ def stream_responses_events(upstream, model, holder):
                 idx = tc.get("index")
                 if idx is None:
                     # 缺 index 的分片按新的调用处理，与 aggregate_stream 一致；
-                    # 落在内部工具已占用的序号上会把客户端的调用吞掉
+                    # 序号与内部工具重复会把客户端的调用吞掉
                     idx = len(tool_calls_map) + len(_internal_calls)
                 fn = tc.get("function") or {}
                 fn_name = fn.get("name") or ""
@@ -6212,9 +5968,8 @@ def stream_responses_events(upstream, model, holder):
                     else:
                         item["type"] = "function_call"
                         item["arguments"] = ""
-                    # namespace 必须在 output_item.added 就带上（照 CiderCC-UwU
-                    # proxy.mjs openItem 的做法）。事后才补只会改到 done，
-                    # 客户端早就从 added 事件派发过了。
+                    # namespace 必须在 output_item.added 就带上：事后才补只会改到
+                    # done，客户端早就从 added 事件派发过了。
                     stamp_namespace(item, ns_map)
                     yield ev("response.output_item.added", {
                         "output_index": out_idx,
@@ -6339,10 +6094,8 @@ def stream_responses_events(upstream, model, holder):
 # Anthropic Messages API (/v1/messages)
 # ---------------------------------------------------------------------------
 #
-# Claude Code and the Anthropic SDKs speak the Messages API, while the upstream
-# only speaks Chat Completions. A Messages request is translated on the way out
-# and the reply is translated back. 设置页「Messages 接口处理方式」选择这条
-# 翻译走哪条管线：
+# Claude Code 与 Anthropic SDK 使用 Messages API，上游只认 Chat Completions；
+# 设置页「Messages 接口处理方式」决定这条翻译走哪条管线：
 #
 #   openai-completions  Messages <-> Chat Completions，直接翻译
 #   openai-responses    Messages <-> Responses，由 Responses 管线再去调用
@@ -6420,9 +6173,8 @@ def _json_object(raw):
 def _anthropic_effort(budget):
     """Anthropic's thinking budget -> the upstream reasoning effort level.
 
-    The budget caps how long the trace may get rather than naming an effort
-    level, so the split is a heuristic: a small budget asks for a short trace,
-    anything larger rides the effort the chat clients get by default.
+    The budget only caps how long the trace may get, so the split is a
+    heuristic.
     """
     try:
         tokens = int(budget)
@@ -6522,15 +6274,15 @@ def messages_to_chat(payload):
                     },
                 })
             elif btype == "tool_result":
-                # A tool result becomes its own tool message; it belongs before
-                # whatever text the same turn carries.
+                # A tool result becomes its own tool message, placed before the
+                # turn's text.
                 messages.append({
                     "role": "tool",
                     "tool_call_id": str(block.get("tool_use_id") or ""),
                     "content": _anthropic_result_text(block.get("content")),
                 })
-            # thinking / redacted_thinking 被丢弃：上游没有对应的签名字段，
-            # 回填思维链由管线自己完成。
+            # thinking / redacted_thinking 被丢弃：上游没有对应签名字段，回填
+            # 思维链由管线自己完成。
         if role == "assistant":
             entry_msg = {"role": "assistant", "content": "\n".join(texts)}
             if any(p.get("type") == "image_url" for p in parts):
@@ -6757,7 +6509,7 @@ def message_error_frame(err_type, message):
 def chat_stream_error_frame(message):
     """One OpenAI-style `error` SSE event.
 
-    上游把流截断时用它收尾：客户端当作错误，不会把半段正文看成完整回答。
+    上游把流截断时用它收尾，客户端会把半截回答当错误处理，不看成完整回答。
     """
     body = json.dumps({"error": {"message": message, "type": "server_error"}},
                       ensure_ascii=False)
@@ -6767,9 +6519,8 @@ def chat_stream_error_frame(message):
 class MessageStreamWriter:
     """Builds one Anthropic Messages SSE stream, block by block.
 
-    Both pipelines feed the same writer: the chat pipeline hands it chat
-    chunks, the Responses pipeline hands it translated Responses events, and
-    either way one continuous message_start .. message_stop sequence comes out.
+    Both pipelines feed the same writer: chat chunks from one side, translated
+    Responses events from the other, one message_start .. message_stop out.
     """
 
     def __init__(self, model, input_tokens=0):
@@ -6884,8 +6635,8 @@ class MessageStreamWriter:
         """Open the block for one Responses output item.
 
         A message item opens no block of its own: the text block starts with
-        the first delta, so a turn whose text was consumed as a DSML tool call
-        does not leave an empty text block behind.
+        the first delta, so text consumed as a DSML tool call leaves no empty
+        block behind.
         """
         itype = str(item.get("type") or "")
         if itype == "reasoning":
@@ -6908,10 +6659,9 @@ class MessageStreamWriter:
     def responses_tool_delta(self, output_index, fragment, complete=None):
         """Feed Responses tool-argument fragments.
 
-        The pipeline holds the first fragment back until the item is done, so
-        what it streams is a suffix of the final arguments instead of a prefix;
+        The pipeline can stream only a suffix of the final arguments, and
         Anthropic clients rebuild the input by concatenation, so the arguments
-        are buffered and emitted once, complete, when the done event arrives.
+        are buffered and sent complete on the done event.
         """
         entry = self.item_blocks.get(output_index)
         if entry is None:
@@ -7069,9 +6819,8 @@ def stream_responses_to_message(writer, frames):
             yield from writer.responses_tool_delta(payload.get("output_index"),
                                                    payload.get("delta"))
         elif etype == "response.function_call_arguments.done":
-            # The pipeline can hold the first fragment back until the item is
-            # done; this event carries the complete arguments, so whatever was
-            # not streamed yet is filled in from it.
+            # This event carries the complete arguments, so whatever was not
+            # streamed yet is filled in from it.
             yield from writer.responses_tool_delta(payload.get("output_index"), None,
                                                    complete=payload.get("arguments"))
         elif etype == "response.output_item.done":
@@ -7095,33 +6844,27 @@ def stream_responses_to_message(writer, frames):
 # ---------------------------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    # Which configured API key the caller used, set by _key_ok(). Its bound
-    # realm decides the upstream exit for this request alone.
+    # Key that _key_ok() matched; its bound realm decides the upstream exit for
+    # this request alone.
     key_entry = None
-    # Audit fields of the request being served, set by _begin_audit() once the
-    # caller is authenticated and passed to every usage row this request writes.
+    # Audit fields of this request, set by _begin_audit(); every usage row it
+    # writes carries them.
     audit = None
-    # The stdlib default caps the request line at 64KB and answers an opaque
-    # bare "414 Request-URI Too Long" for anything longer. Raise it and reply in
-    # the normal JSON error shape so an over-long URL is diagnosable.
+    # The stdlib default caps the request line at 64KB and answers a bare
+    # "414 Request-URI Too Long" for anything longer, so raise the cap and
+    # reply in the normal JSON error shape to keep that diagnosable.
     max_request_line = 1024 * 1024
-    # 客户端连接的读写超时：只发请求头不发正文、或保持连接却一直不发下一个
-    # 请求的连接到时关闭，不会永久占住处理线程。上游连接有自己的超时，向客户端
-    # 流式写出时只有对方长时间不收数据才会触发。
+    # 客户端连接的读写超时：只发请求头不发正文、或保持连接却不发下一个请求的
+    # 连接到时关闭，不会永久占住处理线程；上游连接另有超时。
     timeout = int(os.environ.get("WB_CLIENT_TIMEOUT", 120))
     def handle_one_request(self):
-        # Reset per-request auth state. HTTP/1.1 keeps the connection alive, so
-        # one Handler instance serves many requests; a request that authenticates
-        # via the panel token never reassigns key_entry, and without this reset
-        # it inherited the realm binding of whatever API key used the connection
-        # before it - sending that request to the wrong upstream exit.
+        # HTTP/1.1 长连接下同一个 Handler 实例服务多个请求，鉴权状态必须按请求清零：
+        # 面板令牌鉴权的请求不会重设 key_entry，留着就会继承上一条 API Key 的出口
+        # 绑定，把请求发到错误的出口；审计字段同样只描述单个请求。
         self.key_entry = None
-        # The audit fields describe one request, so they start empty for every
-        # request on this connection too.
         self.audit = None
         bind_audit(None)
-        # Body-tracking state must also start clean for every request, otherwise
-        # a later drain would skip a body that has not been read yet.
+        # 正文跟踪状态同理，否则后续排空会跳过还没读过的正文。
         self._body_consumed = False
         try:
             self.raw_requestline = self.rfile.readline(self.max_request_line + 1)
@@ -7135,12 +6878,9 @@ class Handler(BaseHTTPRequestHandler):
             self.requestline = ''
             self.request_version = ''
             self.command = ''
-            # The cap is enforced by reading at most max_request_line + 1
-            # bytes, so the rest of the oversized line is still in the socket.
-            # Replying and then closing with unread data pending makes the OS
-            # send an RST, which discards the buffered reply - the client sees
-            # a reset and no error at all. Drain a bounded amount first so the
-            # 414 actually arrives.
+            # 上限通过最多读 max_request_line + 1 字节来执行，超长行的其余部分仍在
+            # 套接字里；带着未读数据关闭会让系统发出 RST、丢掉已缓冲的回复，所以
+            # 先做有界排空，保证 414 能真的送到客户端。
             self._drain_oversized_request_line()
             try:
                 self._error(414, "request line too long (limit %d bytes); "
@@ -7173,8 +6913,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
     server_version = "wb-proxy-center/" + VERSION
     def log_message(self, fmt, *args):
-        # 静默过滤前端看板高频定时心跳的正常 200 GET 请求（/logs、/usage、/accounts 轮询等）
-        # 避免日志自增刷屏与污染。遇 4xx/5xx 异常或所有非 GET 业务操作依然如实记录。
+        # 看板高频轮询的成功 GET 不计日志，避免刷屏；异常状态码与非 GET 操作照记。
         try:
             status_code = int(args[1]) if len(args) > 1 and str(args[1]).isdigit() else 200
             if status_code < 400 and getattr(self, "command", "GET") == "GET":
@@ -7193,16 +6932,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        # self.path is unset when parse_request() never ran (an over-long
-        # request line is rejected before it), so fall back to "".
+        # self.path is unset when parse_request() never ran, so fall back to "".
         if cors_origin_allowed(getattr(self, "path", "") or ""):
             self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
-        # Flush here rather than relying on the caller: with HTTP/1.1
-        # keep-alive the client blocks until the response is actually on the
-        # wire, and an error reply only flushed at the end of the handler looks
-        # like a hung request.
+        # HTTP/1.1 长连接下客户端会一直等到响应真正上线，错误回复若只在处理结束
+        # 时才刷出，看起来就像请求挂住，所以这里主动 flush。
         try:
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -7210,24 +6946,19 @@ class Handler(BaseHTTPRequestHandler):
     def _discard_body(self):
         """Drain the request body so the connection stays in sync.
 
-        A POST rejected before its body is read (401, 404, a panel route) leaves
-        the payload sitting in the socket. On a keep-alive connection the next
-        request then starts by parsing that leftover JSON as the request line,
-        which surfaces as a bogus "414 Request-URI Too Long" - with an empty
-        request line in the log - on an otherwise healthy connection.
-
-        Handles both Content-Length and Transfer-Encoding: chunked, since
-        clients switch to the latter for large bodies.
+        A POST rejected before its body is read leaves the payload in the
+        socket, and the next request on a keep-alive connection parses that
+        leftover JSON as its request line, surfacing as a bogus "414
+        Request-URI Too Long" on a healthy connection. Handles both
+        Content-Length and Transfer-Encoding: chunked.
         """
         if getattr(self, "_body_consumed", False):
-            # The handler already read the body (e.g. an error raised after
-            # _read_payload). Reading Content-Length bytes again would block
-            # until the client gives up, turning an instant reply into a hang.
+            # The handler already read the body, so reading Content-Length
+            # bytes again would block until the client gives up.
             return
-        # No parsed request means no headers object and nothing buffered to
-        # drain: the over-long request line is rejected before parse_request()
-        # ever runs. Reading self.headers here would raise out of _error() and
-        # leave the client with no reply at all.
+        # No parsed request means no headers object: the over-long request line
+        # is rejected before parse_request(), and reading self.headers here
+        # would raise out of _error() and leave the client with no reply.
         headers = getattr(self, "headers", None)
         if headers is None:
             return
@@ -7242,9 +6973,8 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0:
             return
         if length > MAX_PAYLOAD_BYTES:
-            # The client announced a body we refuse (413). Reading it would
-            # block until it finishes sending gigabytes, so close instead and
-            # let it see the reply plus the disconnect.
+            # The client announced a body we refuse with 413: reading it would
+            # block until it finishes sending, so close and let it see the reply.
             self.close_connection = True
             return
         remaining = length
@@ -7258,11 +6988,10 @@ class Handler(BaseHTTPRequestHandler):
             # A short read means the peer went away; nothing left to align.
             pass
     def _drain_chunked_body(self):
-        """Consume a chunked body (terminated by a zero-length chunk).
+        """Consume a chunked body, up to the zero-length chunk.
 
         A malformed size line or more than MAX_PAYLOAD_BYTES of chunk data
-        closes the connection instead: past that point the stream can no
-        longer be realigned.
+        closes the connection instead: past that the stream cannot be realigned.
         """
         total = 0
         try:
@@ -7292,17 +7021,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.rfile.read(2)  # trailing CRLF after each chunk
         except OSError:
             self.close_connection = True
-    # How much of an over-long request line to read before giving up. The peer
-    # is already misbehaving; this only needs to be enough that a normal client
-    # (which sent one line and is waiting for an answer) sees the reply.
+    # How much of an over-long request line to read before giving up: enough
+    # that a normal client waiting for an answer still sees the reply.
     OVERSIZED_DRAIN_LIMIT = 8 * 1024 * 1024
 
     def _drain_oversized_request_line(self):
         """Consume the rest of a too-long request line, within a budget.
 
-        Without this the reply is lost to an RST (see the caller). The newline
-        ends the line; past the budget the peer is clearly not going to stop,
-        so give up and let the connection close.
+        Without this the reply is lost to an RST, see the caller. Past the
+        budget the peer clearly will not stop, so give up and close.
         """
         budget = self.OVERSIZED_DRAIN_LIMIT
         try:
@@ -7319,13 +7046,13 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_expect_continue(self):
         """Answer 'Expect: 100-continue' before deciding to reject a body.
 
-        Clients that send this header wait for the interim response before
-        transmitting a large payload. Rejecting outright (or draining first)
-        made both sides wait on each other until the socket timed out.
+        Such clients wait for the interim response before sending a large
+        payload, so rejecting or draining first leaves both sides waiting until
+        the socket times out.
         """
-        # No parsed request means no headers object; there is no interim
-        # response to send, and touching self.headers here would raise out of
-        # the error reply the caller is trying to produce.
+        # No parsed request means no headers to read and no interim response to
+        # send; touching self.headers here would raise out of the error reply
+        # the caller is trying to produce.
         headers = getattr(self, "headers", None)
         if headers is None:
             return
@@ -7339,33 +7066,28 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
     def _error(self, code, message, err_type="server_error"):
-        # Every early rejection funnels through here, so draining the body in
-        # one place covers all of them. Unblock any client still waiting on
-        # "Expect: 100-continue" first, otherwise it never sends the body and
-        # the drain below waits for data that will never arrive.
+        # Every early rejection funnels through here, so the body drain in one
+        # place covers all of them; unblock a client waiting on
+        # "Expect: 100-continue" first, or it never sends the body we drain.
         self._handle_expect_continue()
         self._discard_body()
         self._json(code, {"error": {"message": message, "type": err_type, "code": code}})
     def _rate_limited(self, exc):
         """429 with Retry-After, so clients back off instead of hammering.
 
-        The upstream body names the reset time; when it does not, fall back to
-        the shortest model cooldown we know about.
+        The wait comes from the upstream body, or the shortest known cooldown.
         """
         wait = max(1, int(getattr(exc, "wait", 60) or 60))
-        # A 429 raised without an upstream call (the pool is parked by the
-        # daily token guard) carries its own text; everything else keeps the
-        # upstream wording.
+        # A 429 raised without an upstream call, like the daily token guard
+        # parking the pool, carries its own text.
         custom = getattr(exc, "message", "")
         text = custom or (
             "upstream rate limit reached for this model; retry in %ds" % wait)
-        # The upstream detail only decorates the upstream wording; a local
-        # message would only repeat itself.
+        # Only the upstream wording gets the detail appended.
         detail = ""
         if exc.detail and not custom:
             detail = " - " + exc.detail[:200]
-        # 429 can be answered before the body is read (the model cooldown is
-        # checked on the way in), so drain it exactly like _error does.
+        # A 429 can be raised before the body is read, so drain it like _error does.
         self._handle_expect_continue()
         self._discard_body()
         body = json.dumps({
@@ -7386,9 +7108,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
     def _download(self, filename, obj):
         """Send a JSON document as a browser download.
-        Content-Disposition is quoted because the filename is generated from
-        user-controlled parts (the realm filter) and could otherwise break the
-        header or allow a response-splitting attempt.
+
+        The Content-Disposition filename is quoted and sanitised because it
+        carries user-controlled parts, so it could otherwise break the header
+        or allow a response-splitting attempt.
         """
         body = json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
         safe = re.sub(r'[^A-Za-z0-9._-]', "_", str(filename))[:120] or "export.json"
@@ -7407,12 +7130,10 @@ class Handler(BaseHTTPRequestHandler):
         Accepts the spellings clients actually send: the Authorization header
         with or without the "Bearer" scheme, the x-api-key / api-key headers
         used by several OpenAI-compatible clients, and the ?key= query the
-        dashboard falls back to when it cannot set headers.
+        dashboard falls back to.
         """
-        # The auth scheme is case-insensitive per RFC 7235, so "bearer sk-x"
-        # and "BEARER sk-x" must strip just like "Bearer sk-x". The old
-        # removeprefix("Bearer ") left the scheme attached for other casings
-        # and the whole "bearer sk-x" string was then compared as a key.
+        # The auth scheme is case-insensitive per RFC 7235, so every casing of
+        # "Bearer" must be stripped before the rest is compared as a key.
         header = (self.headers.get("Authorization") or "").strip()
         supplied = ""
         if header:
@@ -7430,9 +7151,8 @@ class Handler(BaseHTTPRequestHandler):
             value = (self.headers.get(name) or "").strip()
             if value:
                 return value
-        # Browsers cannot set headers on a top-level navigation, so accept the
-        # key as a query parameter too - the dashboard uses this when opened
-        # from another device.
+        # Browsers cannot set headers on a top-level navigation, so the ?key=
+        # query is accepted too.
         try:
             query = parse_qs(urlparse(self.path).query)
             for name in ("key", "api_key", "api-key"):
@@ -7444,8 +7164,8 @@ class Handler(BaseHTTPRequestHandler):
             return ""
     def _key_ok(self):
         """True when the request carries a right key (or no key is needed)."""
-        # An authenticated panel session also unlocks the management APIs,
-        # so the browser never has to keep the API key in localStorage.
+        # A panel session also unlocks the management APIs, so the browser
+        # never keeps the API key.
         if self._panel_ok():
             return True
         self.key_entry = identify_key(self._supplied_key())
@@ -7459,9 +7179,9 @@ class Handler(BaseHTTPRequestHandler):
         return (self.key_entry or {}).get("realm") or ""
     def _cross_realm_error(self, model, realm):
         """Explain a model/exit mismatch instead of letting upstream reject it.
-        Sending gpt-6-astra to the domestic exit (or deepseek-v4-pro to the
-        international one) earns an opaque 403 from upstream, so catch it here
-        and say which key is bound where.
+
+        A model sent to the wrong exit earns an opaque upstream 403, so say
+        which key is bound where instead.
         """
         if not realm or not model:
             return ""
@@ -7485,8 +7205,7 @@ class Handler(BaseHTTPRequestHandler):
     def _key_model_error(self, model):
         """Per-key model restriction: reject before the request reaches upstream.
 
-        A key that lists no models stays unrestricted, so this is a no-op
-        unless the operator asked for a limit.
+        A key that lists no models stays unrestricted.
         """
         entry = self.key_entry
         if not entry:
@@ -7499,8 +7218,8 @@ class Handler(BaseHTTPRequestHandler):
         """Capture this request's audit fields once, at request start.
 
         A streaming response and the web-tool follow-up rounds finish long
-        after the request line was read, so the key, the client address and
-        the endpoint are recorded here instead of being read back later.
+        after the request line was read, so record them here rather than
+        reading them back later.
         """
         if self._panel_ok():
             key_id = "panel"
@@ -7517,11 +7236,9 @@ class Handler(BaseHTTPRequestHandler):
     def _key_limits_ok(self, is_messages=False):
         """Refuse a request whose key is expired, off its IP list or out of quota.
 
-        This runs after the key was accepted, so the entry here is the one the
-        caller actually presented. A panel session is exempt: the test bench
-        runs on the operator's own login and has no client key behind it.
-        Returns True when the request may continue; the refusal has already
-        been written when it returns False.
+        Runs after the key was accepted; a panel session is exempt because the
+        test bench runs on the operator's own login. Returns True when the
+        request may continue, and has written the refusal otherwise.
         """
         if self._panel_ok():
             return True
@@ -7546,8 +7263,7 @@ class Handler(BaseHTTPRequestHandler):
                          entry.get("name") or "未命名",
                          "、".join(entry.get("ip_allowlist") or []) or "-"))
             return self._refuse_key_limit(403, reason, is_messages)
-        # Counting a key's usage reads usage.jsonl, so it only happens when the
-        # key actually carries a quota to compare it against.
+        # Reading a key's usage touches usage.jsonl, so only when a quota is set.
         if (entry.get("quota_tokens") or 0) or (entry.get("quota_credit") or 0):
             quota = wb_settings.key_quota_reason(
                 entry, key_usage(entry.get("id") or "", entry.get("usage_reset_at") or 0))
@@ -7567,10 +7283,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _request_realm(self, explicit=None):
         """Pick the upstream exit for this request.
-        Priority: an explicit ?realm= argument, then the realm bound to the
-        API key, then the X-Realm header / ?realm= query, and finally the
-        global switch. Returning None lets open_upstream() fall back to
-        model-based detection.
+
+        Priority: the explicit argument, the realm bound to the API key, the
+        X-Realm header or ?realm= query, then the global switch; None lets
+        open_upstream() fall back to model-based detection.
         """
         if explicit:
             return explicit
@@ -7587,9 +7303,9 @@ class Handler(BaseHTTPRequestHandler):
     def _authorized(self):
         if self._key_ok():
             return True
-        # Say how a key must be presented, so a key that merely looks identical
-        # (masked copy, trailing whitespace) is diagnosable straight from the
-        # client error. Deliberately does not echo key names or values.
+        # Say how a key must be presented, so a masked copy or stray whitespace
+        # is diagnosable from the client error; key names and values are never
+        # echoed.
         hint = ("send it as 'Authorization: Bearer <key>' or '?key=<key>'; "
                 "copy the value from the panel's 设置 page")
         try:
@@ -7603,8 +7319,9 @@ class Handler(BaseHTTPRequestHandler):
     # ---- web panel access ----
     def _panel_token(self):
         """Session token from the X-Panel-Token header.
+
         Deliberately header-only: a token in the query string leaks through
-        browser history, the Referer header and any reverse-proxy access log.
+        browser history, the Referer header and proxy access logs.
         """
         token = (self.headers.get("X-Panel-Token") or "").strip()
         return token
@@ -7614,8 +7331,7 @@ class Handler(BaseHTTPRequestHandler):
     def _debug_account(self):
         """X-Debug-Account 指定的调试账号，空串表示交给账号池调度。
 
-        只认面板会话：这个头是测试台用的，客户端 Key 带它一律忽略，免得
-        客户端绕过调度固定账号。
+        只认面板会话：这个头是测试台用的，客户端 Key 带它一律忽略。
         """
         uid = (self.headers.get(DEBUG_ACCOUNT_HEADER) or "").strip()
         if not uid or not self._panel_ok():
@@ -7625,8 +7341,9 @@ class Handler(BaseHTTPRequestHandler):
     @staticmethod
     def _is_panel_route(path):
         """Management endpoints shown in the web panel.
-        Model listings stay reachable with the API key alone so that plain
-        OpenAI clients can keep discovering models.
+
+        Model listings stay reachable with the API key alone, so plain OpenAI
+        clients can keep discovering models.
         """
         if path.startswith("/accounts"):
             return True
@@ -7649,6 +7366,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Content-Length", "0")
         self.end_headers()
+    # Accept the conventional /v1 prefix and the bare path: clients differ in
+    # whether they append "/v1" themselves.
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -7744,15 +7463,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _get_panel_status(self):
-        # 面板状态只给已经登录的浏览器；没有会话直接 401，报体只有错误本身。
+        # 面板状态只给已登录的浏览器：没有会话直接 401，报体只有错误本身。
         if not self._panel_ok():
             return self._error(401, "panel password required", "invalid_request_error")
-        # Whether a key exists is not a secret; its value never leaves the
-        # process, and the settings endpoint only reports a masked form.
+        # Whether a key exists is not a secret: its value never leaves the
+        # process and is only reported masked.
         return self._json(200, {
             "panel_password_is_default": wb_settings.panel_password_is_default(ACCOUNTS_DIR),
             "api_key_set": bool(API_KEY),
-            # 看板顶栏的状态点读这里：账号总数与可用数只给持有面板会话的浏览器。
             "accounts": len(POOL.accounts) if POOL else 0,
             "accounts_ready": POOL.count_ready() if POOL else 0,
         })
@@ -7764,8 +7482,6 @@ class Handler(BaseHTTPRequestHandler):
         if not POOL.count_ready():
             return self._json(503, {"ok": False, "error": "no account available"})
         return self._json(200, {"ok": True})
-    # Accept the conventional /v1 prefix and the bare path, because clients
-    # differ in whether they append "/v1" themselves.
 
     def _get_realm(self):
         return self._json(200, {"current": CURRENT_REALM, "options": ["intl", "cn"]})
@@ -7857,7 +7573,6 @@ class Handler(BaseHTTPRequestHandler):
     def _get_accounts_credits(self):
         if not self._authorized():
             return
-        # Refresh credits for all accounts
         for a in (POOL.accounts if POOL else []):
             a.fetch_credits()
         return self._json(200, {"accounts": account_views()})
@@ -7874,8 +7589,7 @@ class Handler(BaseHTTPRequestHandler):
     def _get_accounts(self, query):
         if not self._authorized():
             return
-        # Fold the usage log before building the view, so the 日限额 badge and
-        # the parked count describe right now instead of the last request.
+        # Fold the usage log first, so the 日限额 badge and the parked count are current.
         apply_daily_token_limit()
         return self._json(200, {
             "accounts": account_views(realm=query.get('realm', [None])[0] or CURRENT_REALM),
@@ -7886,10 +7600,8 @@ class Handler(BaseHTTPRequestHandler):
     def _get_accounts_export(self, query):
         if not self._authorized():
             return
-        # ?download=1 makes the browser save it as a file; without it the
-        # document is returned inline so the dashboard can show a summary.
-        # ?uid= narrows it to specific accounts (repeatable, comma-joined),
-        # which is how the per-row "export" button works.
+        # ?download=1 让浏览器存成文件，否则回内联文档供看板展示摘要；
+        # ?uid= 可重复、支持逗号分隔，看板每行的导出按钮就是这样传的。
         realm = (query.get("realm") or [None])[0] or None
         if realm not in ("intl", "cn"):
             realm = None
@@ -7912,8 +7624,8 @@ class Handler(BaseHTTPRequestHandler):
         if (query.get("download") or ["0"])[0] in ("1", "true", "yes"):
             stamp = time.strftime("%Y%m%d-%H%M%S")
             if len(uids) == 1:
-                # Name a single-account export after the account, so a
-                # folder of them stays readable.
+                # Name a single-account export after the account to keep a
+                # folder of them readable.
                 label = uids[0][:8]
             else:
                 label = realm + "-" if realm else ""
@@ -8030,8 +7742,8 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def _get_settings_reveal(self, query):
-        # The panel only ever draws masked keys, so copying one needs an
-        # explicit request. Panel session required, API key is not enough.
+        # The panel only draws masked keys, so copying one needs an explicit
+        # request; a panel session is required and an API key is not enough.
         if not self._panel_ok():
             return self._error(401, "panel password required", "invalid_request_error")
         wanted = (query.get("id") or [""])[0]
@@ -8043,9 +7755,8 @@ class Handler(BaseHTTPRequestHandler):
     def _read_chunked_body(self, max_bytes=MAX_PAYLOAD_BYTES):
         """Decode a Transfer-Encoding: chunked body into bytes.
 
-        Some OpenAI-compatible clients stream large requests with chunked
-        encoding instead of a Content-Length. Reading only Content-Length saw an
-        empty body and answered 400 invalid JSON.
+        Some OpenAI-compatible clients stream large requests chunked instead of
+        with a Content-Length, and reading only the latter saw an empty body.
         """
         chunks = []
         total = 0
@@ -8083,8 +7794,8 @@ class Handler(BaseHTTPRequestHandler):
         return b"".join(chunks)
     def _read_payload(self, max_bytes=MAX_PAYLOAD_BYTES, allow_list=False):
         """Parse the request body into a dict (or a list when allow_list).
-        Raises BodyTooLarge / BadJSON so every caller handles both cases the
-        same way instead of each remembering to check for None.
+
+        Raises BodyTooLarge / BadJSON so every caller handles both the same way.
         """
         transfer_encoding = (self.headers.get("Transfer-Encoding") or "").lower()
         try:
@@ -8107,8 +7818,7 @@ class Handler(BaseHTTPRequestHandler):
             raise BadJSON()
         try:
             raw = self.rfile.read(length).decode("utf-8") if length else "{}"
-            # Mark the body as taken so a later error reply does not try to
-            # drain the same bytes again (that read would block forever).
+            # Mark the body as taken so a later error reply does not drain it again.
             self._body_consumed = True
             data = json.loads(raw or "{}")
         except Exception:
@@ -8116,8 +7826,7 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data, dict):
             return data
         if allow_list and isinstance(data, list):
-            # The account-import endpoint accepts a bare array of accounts,
-            # which is the most natural shape for a hand-written file.
+            # The account-import endpoint accepts a bare array of accounts.
             return data
         return {}
     def _payload_or_error(self, allow_list=False):
@@ -8141,8 +7850,8 @@ class Handler(BaseHTTPRequestHandler):
             raw = payload.get("api_keys")
             if not isinstance(raw, list):
                 return self._error(400, "api_keys must be a list", "invalid_request_error")
-            # The panel only ever shows a masked key, so a blank value means
-            # "keep what is stored" for that row rather than "clear it".
+            # A blank value means "keep what is stored": the panel only shows
+            # masked keys.
             existing = {entry.get("id"): entry for entry in configured_keys()}
             cleaned = []
             for item in raw:
@@ -8154,18 +7863,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not value and entry_id and entry_id in existing:
                     value = existing[entry_id].get("key") or ""
                 # A new row keeps an empty id here; wb_settings mints a random
-                # one on write. Deriving it from the row's position reused ids
-                # of rows deleted earlier, and two rows sharing an id made
-                # /settings/reveal answer with the wrong key.
+                # one on write.
                 if value and len(value) < 4:
                     return self._error(400, "api key must be at least 4 characters",
                                        "invalid_request_error")
                 if not value:
                     return self._error(400, "a key entry is empty - fill it in or remove the row",
                                        "invalid_request_error")
-                # The same "omitted means keep" rule covers the exit binding:
-                # a panel that does not send the field must not silently
-                # unbind a key from its exit. An empty string still clears it.
+                # Omitted means keep for the exit binding too; an empty string
+                # still clears it.
                 if "realm" in item:
                     realm = str(item.get("realm") or "").strip().lower()
                     if realm not in ("", "intl", "cn"):
@@ -8173,16 +7879,14 @@ class Handler(BaseHTTPRequestHandler):
                                            "invalid_request_error")
                 else:
                     realm = existing.get(entry_id, {}).get("realm") or ""
-                # An older cached panel does not know this field at all, so a
-                # row that omits it keeps whatever is stored instead of
-                # silently dropping the restriction.
+                # A row that omits this field keeps what is stored; an older
+                # cached panel may not send it.
                 if "models" in item:
                     models = item.get("models")
                 else:
                     models = existing.get(entry_id, {}).get("models")
-                # The same "omitted means keep" rule covers the limits: a key
-                # that arrived with an expiry / quota must not lose it because
-                # some other field was edited by an older panel.
+                # Omitted means keep for the limits too, so an older panel
+                # editing another field cannot drop them.
                 previous = existing.get(entry_id) or {}
                 limits = {}
                 for field, validate in (("expires_at", wb_settings.clean_epoch_field),
@@ -8300,9 +8004,8 @@ class Handler(BaseHTTPRequestHandler):
             wb_settings.set_session_affinity(ACCOUNTS_DIR, raw)
             reply["session_affinity"] = raw
         if "auto_switch_product" in payload:
-            # Strictly a JSON boolean: a string like "false" would be truthy and
-            # silently switch the feature on, which is the one thing an operator
-            # turning it off must not get.
+            # Strictly a JSON boolean: a truthy string like "false" would switch
+            # the feature on.
             raw = payload.get("auto_switch_product")
             if not isinstance(raw, bool):
                 return self._error(400, "auto_switch_product must be true or false",
@@ -8386,8 +8089,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
             saved = wb_settings.set_proxy_slots(ACCOUNTS_DIR, cleaned)
             if POOL:
-                # A slot may have been removed: unbind anyone still naming it
-                # before recomputing, so a stale id cannot survive.
+                # Unbind accounts still naming a removed slot before recomputing.
                 dropped = wb_settings.drop_missing_bindings(POOL, saved)
                 POOL.apply_proxy_slots(saved)
                 if dropped:
@@ -8472,8 +8174,8 @@ class Handler(BaseHTTPRequestHandler):
         if POOL is None:
             return self._error(503, "account pool unavailable")
         if path == "/accounts/import" and isinstance(payload, list):
-            # A bare array is only meaningful for import; wrap it so the rest
-            # of this handler can keep assuming a dict.
+            # A bare array is only meaningful for import; wrap it so the rest can
+            # assume a dict.
             payload = {"data": payload}
         if not isinstance(payload, dict):
             return self._error(400, "expected a JSON object", "invalid_request_error")
@@ -8544,9 +8246,8 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             try:
                 if account.set_product(target):
-                    # 立刻写入凭证文件：set_product() 只改内存，而面板上这一下是操作者
-                    # 的明确选择，不能等到别的路径（refresh / 签到 / 查积分）刚好
-                    # 存档才生效——切完就重启容器的人会白白丢掉这次切换。
+                    # set_product() 只改内存；面板上这一下是操作者的明确选择，要立刻
+                    # 写盘，不能等别的路径存档时才生效，否则切完就重启会丢掉这次切换。
                     try:
                         account.save(ACCOUNTS_DIR)
                     except Exception as exc:
@@ -8605,9 +8306,7 @@ class Handler(BaseHTTPRequestHandler):
             nick = acc.nickname or uid_str
             combined_logs.append(f"====== 正在为账号 {nick}（{acc.uid}）执行成长任务（{i+1}/{len(targets)}）======")
             res = run_growth_tasks(acc, gap=1.0)
-            # run_growth_tasks() reports its total as "earned_credit";
-            # reading the old "credit_added" name silently summed zeros
-            # and the dashboard always showed "+0 积分".
+            # run_growth_tasks() reports its total as "earned_credit".
             total_credit += res.get("earned_credit") or 0
             for l in res.get("logs") or []:
                 combined_logs.append(f"  {l}")
@@ -8675,9 +8374,9 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True})
 
     def _route_realm(self, payload):
-        # Changing the exit affects every key that is not realm-bound, so
-        # it is an admin action: the panel session is required. GET /realm
-        # stays open to API keys because it only reports the current exit.
+        # Changing the exit affects every key that is not realm-bound, so it
+        # needs the panel session; GET /realm stays open to API keys because it
+        # only reports the current exit.
         if not self._panel_ok():
             return self._error(403, "changing the upstream exit requires the "
                                     "panel session, not an API key",
@@ -8715,7 +8414,7 @@ class Handler(BaseHTTPRequestHandler):
     def _route_accounts_daily_chat_web(self, payload):
         """网页通道打卡：只建网页端会话，不发桌面端那条轻量对话。
 
-        手动触发用。刻意不写 lastDailyChat——那是「今天已经打过卡」的闸门，
+        手动触发用；刻意不写 lastDailyChat，那是「今天已经打过卡」的闸门，
         手动补一次不该让定时巡检跳过当天的正常流程。
         """
         uid = payload.get("uid")
@@ -8749,10 +8448,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"cancelled": POOL.cancel_login(state)})
 
     def _route_accounts_import_desktop(self, payload):
-        # Two ways to call this:
-        #   {}                     -> scan only (read-only, nothing imported)
-        #   {"path": "..."}        -> import that credential
-        #   {"all": true}          -> import everything the scan found
+        # Three call shapes: {} scans only, {"path": "..."} imports that
+        # credential, {"all": true} imports everything the scan found.
         target_path = payload.get("path")
         if target_path:
             realm = payload.get("realm")
@@ -8803,9 +8500,7 @@ class Handler(BaseHTTPRequestHandler):
         account = POOL.get(uid)
         if not account:
             return self._error(404, "no such account")
-        # The panel picks a model per exit in the settings page; an explicit
-        # `model` in the payload still wins so a scripted caller can test one
-        # model without touching the setting.
+        # The panel picks a model per exit; an explicit `model` in the payload wins.
         test_model = (str(payload.get("model") or "").strip()
                       or wb_settings.test_model(ACCOUNTS_DIR, account.realm))
         chat_url = account.chat_base_url() + CHAT_PATH
@@ -8875,8 +8570,7 @@ class Handler(BaseHTTPRequestHandler):
         uid = payload.get("uid")
         if not uid:
             return self._error(400, "uid required")
-        # Each field is applied on its own so a caller can change one thing
-        # without restating the others; at least one must be present.
+        # Each field applies on its own; at least one must be present.
         updated = None
         if "proxySlot" in payload:
             updated = POOL.set_proxy_slot(uid, payload.get("proxySlot"))
@@ -8948,20 +8642,12 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"deleted": removed, "accounts": account_views()})
 
     def _route_accounts_import(self, payload):
-        # Import a previously exported document (or any hand-written list
-        # of accounts). Body shapes accepted, see wb_accounts._coerce_account_rows:
-        #   {"format":"workbuddy-accounts","accounts":[...]}   <- our export
-        #   [...]                                              <- bare list
-        #   {"accessToken": ...}                               <- single account
-        #   {"account":{...},"auth":{...}}                     <- desktop credential
+        # Import a previously exported document or any hand-written account
+        # list; the accepted body shapes live in wb_accounts._coerce_account_rows.
         #
-        # Options:
-        #   dryRun    (bool) - validate and report, write nothing
-        #   overwrite (bool) - replace accounts whose uid already exists
-        #   realm     ("intl"|"cn") - force a realm instead of detecting it
-        #
-        # `data` carries the document. It is preferred over the bare body so
-        # the body can also hold the options above.
+        # Options: dryRun validates and writes nothing, overwrite replaces an
+        # existing uid, realm forces "intl" / "cn" instead of detecting it.
+        # `data` carries the document, so the body can also hold the options.
         blob = payload.get("data") if "data" in payload else payload
         if not isinstance(blob, (dict, list)):
             return self._error(400, "the document must be a JSON object or array",
@@ -8976,10 +8662,8 @@ class Handler(BaseHTTPRequestHandler):
         if forced_realm and forced_realm not in ("intl", "cn"):
             return self._error(400, "realm must be intl or cn", "invalid_request_error")
         if dry_run:
-            # Validate every row without touching the pool so the caller can
-            # see exactly what an import would do before committing to it.
-            # Shares its rules with the real import, so the preview cannot
-            # disagree with what would actually happen.
+            # Validate every row without touching the pool; it shares its rules
+            # with the real import, so the preview cannot disagree with it.
             return self._json(200, {
                 "dryRun": True,
                 "count": len(rows),
@@ -8998,12 +8682,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_responses(self, payload):
         """Serve /v1/responses by translating to chat completions upstream."""
-        # The gateway is stateless: it keeps no store of previous responses,
-        # so it cannot replay a prior turn. Silently ignoring the field would
-        # answer a follow-up as if it were a fresh conversation - the client
-        # gets a normal-looking reply with the context missing. Say so instead.
-        # 拒绝 namespace 工具，逼 Codex fallback 成 flat 工具清单。
-        # 不这样做的话，MCP／外挂工具全部会被 app 判定为不可执行。
+        # The gateway keeps no store of previous responses, so it cannot replay
+        # a prior turn; silently ignoring the field would answer a follow-up as
+        # a fresh conversation with the context missing. Say so instead.
         if payload.get("previous_response_id"):
             return self._error(
                 400,
@@ -9100,8 +8781,8 @@ class Handler(BaseHTTPRequestHandler):
                   "realm": realm}
         first_ms = None
         try:
-            # 一轮跑完如果模型要的是 web_search / web_fetch，就由反代
-            # 执行、把结果喂回去再跑一轮。客户端从头到尾只看到一则连续的响应。
+            # 模型要 web_search / web_fetch 时由反代代跑，把结果喂回去再跑一轮；
+            # 客户端从头到尾只看到一则连续的响应。
             rounds = 0
             total_usage = None
             while True:
@@ -9186,9 +8867,8 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def _responses_nonstream_response(self, upstream, model, custom_names, request_meta, fp, account, t_start, namespace_map=None, base_body=None, session_key=None, realm=None, effort=None, *, lease):
-        # 跟串流那条一样：客户端宣告 web_search / web_fetch 时由反代代跑。
-        # 中间那几轮对客户端不可见，最后才组成一个 Responses 对象返回；不这样
-        # 做的话 web_search 的 function_call 会直接漏给客户端，客户端只会回
+        # 同串流那条：客户端宣告 web_search / web_fetch 时由反代代跑，中间几轮
+        # 对客户端不可见。否则 function_call 会直接漏给客户端，而客户端只会回
         # 一句 unsupported call。
         sources = []
         rounds = 0
@@ -9258,7 +8938,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_messages(self, payload):
         """Serve /v1/messages on the pipeline the settings page selected."""
         # max_tokens is mandatory in the Messages API: without it the model's
-        # own ceiling applies and the reply quietly exceeds what was asked for.
+        # own ceiling applies instead.
         if payload.get("max_tokens") is None:
             return self._anthropic_error(400, "max_tokens is required",
                                          "invalid_request_error")
@@ -9390,8 +9070,8 @@ class Handler(BaseHTTPRequestHandler):
     def _messages_stream_close(self, writer, model, fp, account, t_start, first_ms, effort=None):
         """Emit the terminal events (or the failure event) and log usage.
 
-        上游把流截断时这里不能收尾：message_delta 与 message_stop 等于替
-        客户端宣布回答已经完整。该发 error 事件，已经流出去的内容不重发。
+        上游把流截断时不能收尾：message_delta 与 message_stop 等于替客户端
+        宣布回答完整，该发 error 事件，已流出的内容不重发。
         """
         if not writer.saw_terminal:
             self._messages_stream_aborted(
@@ -9619,8 +9299,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             return
         if not is_account_route:
-            # 客户端接口：先判 Key 自己的限额，再读正文并占并发槽，免得为一个
-            # 必然被拒的请求解析上传的大 body。审计字段同一时刻固定下来。
+            # 客户端接口：先判 Key 限额再读正文、占并发槽，免得为必然被拒的请求
+            # 解析大 body；审计字段也在同一时刻固定。
             self._begin_audit(chat_api_name(path))
             if not self._key_limits_ok(is_messages):
                 return
@@ -9629,9 +9309,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if is_account_route:
             return self._handle_accounts(path, payload)
-        # Both OpenAI-shaped routes below can hold a thread for up to 600s.
-        # Take a slot for the duration; release it in finally so every early
-        # return (including client disconnects) gives the slot back.
+        # Both OpenAI-shaped routes below can hold a thread for up to 600s, so
+        # hold a slot for the duration and release it in finally, which also
+        # covers early returns and client disconnects.
         if not _chat_slots.acquire(timeout=CHAT_SLOT_WAIT_SECONDS):
             if is_messages:
                 return self._anthropic_error(
@@ -9645,8 +9325,8 @@ class Handler(BaseHTTPRequestHandler):
             _chat_slots.release()
 
     def _dispatch_chat_post(self, path, payload):
-        # 先挡背景请求：Codex 自己发的（记忆整理／环境建议／自动复核）
-        # 不算「用户实际使用」，一律本地拒绝，不碰上游。
+        # 先挡背景请求：Codex 自己发的记忆整理／环境建议／自动复核不算用户实际使用，
+        # 一律本地拒绝，不碰上游。
         if BLOCK_BACKGROUND_REQUESTS:
             reason = background_request_reason(payload)
             if reason:
@@ -9661,8 +9341,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_responses(payload)
         if path in ("/v1/messages", "/messages"):
             return self._handle_messages(payload)
-        # Diagnostics: what the client actually asked for, and what we forward.
-        # Only the knobs that change behaviour are logged - never message text.
+        # Log what the client asked for and what we forward: only the knobs
+        # that change behaviour, never message text.
         forwarded = build_upstream_body(payload)
         given = client_effort_of(payload) or payload.get("reasoning") \
             or payload.get("thinking") or payload.get("enable_thinking")
@@ -9726,9 +9406,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(exc.code, f"upstream {exc.code}: {detail}")
         except Exception as exc:
             message = str(exc)
-            # Only a genuinely empty/cooling pool is a 503. A throttled model
-            # is reported as 429 by _rate_limited above instead. The row
-            # records the status the client actually receives.
+            # Only a genuinely empty or cooling pool is a 503; a throttled model
+            # gets a 429 from _rate_limited above. The usage row records the
+            # status the client actually receives.
             no_account = message.startswith("no usable account")
             record_error(model, 503 if no_account else 502, message,
                          elapsed_ms=int((time.time() - t_start) * 1000),
@@ -9861,7 +9541,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(502, f"upstream stream error: {exc}")
         wall = int((time.time() - t_start) * 1000)
         first_at = result.get("first_chunk_at")
-        # Measured from request arrival so streaming and non-streaming are comparable.
+        # Measured from request arrival, so both modes are comparable.
         first_ms = int((first_at - t_start) * 1000) if first_at else None
         record_usage(model, result.get("usage"), stream=False,
                      elapsed_ms=wall, ttft_ms=first_ms,
@@ -9908,8 +9588,8 @@ def _parse_cli_args():
 
 def _apply_cli_overrides(args):
     global USAGE_DIR, USAGE_LOG
-    # LAN mode binds every interface. The key is generated below, once
-    # ACCOUNTS_DIR is resolved, so it can be persisted and reused.
+    # LAN mode binds every interface; the key is generated below, once
+    # ACCOUNTS_DIR is resolved.
     if args.lan and args.host == "127.0.0.1":
         args.host = "0.0.0.0"
     if args.user_agent:
@@ -9920,9 +9600,8 @@ def _apply_cli_overrides(args):
         USAGE_LOG = os.path.join(USAGE_DIR, "usage.jsonl")
 
 def _probe_running_instance(args):
-    # Refuse to start a second copy. On Windows SO_REUSEADDR lets two sockets
-    # bind the same port, which silently splits incoming connections between
-    # them - confusing and hard to diagnose.
+    # Refuse to start a second copy: on Windows SO_REUSEADDR lets two sockets
+    # bind the same port and silently split incoming connections.
     existing, ours = None, False
     try:
         probe = urllib.request.urlopen(
@@ -9932,12 +9611,11 @@ def _probe_running_instance(args):
     except urllib.error.HTTPError as exc:
         probe = exc  # 没有账号可接单时 /health 回 503，那也是在运行的网关
     except Exception:
-        probe = None  # nothing answering /health - let the bind below decide
+        probe = None  # nothing answering /health; let the bind below decide
     if probe is not None:
-        # 本网关的响应头带 wb-proxy-center/<版本>，用它区分同一个端口上的
-        # 其它服务：别人占着这个端口时也可能回一个 JSON 的 /health（开发代理、
-        # 另一个网关）；把那种响应当成「已经在运行」会让启动器直接退出，而端口
-        # 其实握在别人手里，看板于是显示别人的界面、接口报 401/404。
+        # 本网关的响应头带 wb-proxy-center/<版本>，用它区分同端口上的其它服务：
+        # 别人占着端口时也可能回 JSON 的 /health，把那种响应当成「已经在运行」
+        # 会让启动器直接退出，而看板显示别人的界面、接口报 401/404。
         ours = probe.headers.get("Server", "").startswith("wb-proxy-center/")
         try:
             existing = json.loads(probe.read().decode("utf-8"))
@@ -9963,9 +9641,8 @@ def _probe_running_instance(args):
         print()
         print("  如果要重启，先把原来那个窗口关掉（或结束 python 进程），再运行本程序。")
         print()
-        # Return True so main() stops here. A bare return gives None, which
-        # main() reads as "no running copy" and it would carry on to bind the
-        # port that is already taken.
+        # Must return True: a bare return gives None, which main() reads as
+        # "no running copy" and it would bind the port that is already taken.
         return True
     return False
 
@@ -9977,14 +9654,12 @@ def _bootstrap_runtime(args):
     SYSTEM_PROMPT = args.system_prompt
     if args.accounts_dir:
         ACCOUNTS_DIR = os.path.abspath(args.accounts_dir)
-    # LAN mode must not ship a known key: the gateway spends the account's own
-    # upstream quota, so a guessable default lets anyone on the network drain
-    # it. Generate one on first use, persist it, and reuse it afterwards.
+    # LAN mode must not ship a guessable key: the gateway spends the account's
+    # own upstream quota. Generate one on first use, persist and reuse it.
     if args.lan and not API_KEY:
         API_KEY, api_key_generated = wb_settings.ensure_launcher_key(ACCOUNTS_DIR)
-    # A key saved from the panel wins over an auto-generated LAN key so a
-    # change made in the browser survives a restart of the .bat file. An
-    # explicit --api-key on the command line still takes precedence.
+    # A key saved from the panel wins over an auto-generated LAN key, so a
+    # browser change survives a restart; --api-key still takes precedence.
     global API_KEY_FILE_SET
     saved_key, key_from_panel = wb_settings.api_key_override(ACCOUNTS_DIR)
     if key_from_panel and not args.api_key:
@@ -10025,8 +9700,8 @@ def _report_first_run(args):
         return True
     first_run = not POOL.accounts
     if first_run:
-        # Never adopt the desktop client's login silently: just report what is
-        # available and let the user import it from the dashboard.
+        # Never adopt the desktop client's login silently; report what is
+        # available and let the user import it.
         detected = desktop_credential_scan()
         usable = [d for d in detected if d.get("valid")]
         if usable:
@@ -10043,8 +9718,8 @@ def _report_first_run(args):
         else:
             log("no accounts yet - no desktop credentials found on this machine")
     if first_run and not POOL.accounts:
-        # Do NOT exit here: the dashboard has to stay reachable so a new
-        # account can be added through the browser login flow.
+        # Do NOT exit here: the dashboard stays reachable for the browser login
+        # flow, which is how a new account gets added.
         log("still no accounts - starting anyway so you can log in via the dashboard")
     return False
 
@@ -10121,9 +9796,9 @@ def _serve_forever(args):
     try:
         server = ThreadingHTTPServer((args.host, args.port), Handler)
     except OSError as exc:
-        # Port stolen between the probe above and this bind, or held by
-        # something that does not answer /health: report it in plain words
-        # instead of dumping a raw socketserver traceback.
+        # Port taken between the probe above and this bind, or held by something
+        # that does not answer /health: report it in plain words instead of
+        # dumping a raw socketserver traceback.
         print()
         print(f"  [ERROR] failed to listen on {args.host}:{args.port} - {exc}")
         print("          the port is reserved or held by another program;")
@@ -10134,11 +9809,10 @@ def _serve_forever(args):
         print("          %s" % launcher_hint(args.port + 1))
         print()
         raise SystemExit(1)
-    # Only claim the address once the socket really exists, so a failed bind
-    # never prints a "listening" line that contradicts the error below.
-    # Report the state the request path actually enforces: the panel can turn
-    # key checking on after startup, so reading API_KEY alone printed "off"
-    # while every /v1 call was still being rejected with 401.
+    # Only claim the address once the socket exists, so a failed bind never
+    # prints a "listening" line that contradicts the error below.
+    # Report what the request path enforces: the panel can enable key checking
+    # after startup, so API_KEY alone would print "off" while /v1 kept rejecting.
     if auth_required():
         _panel_keys = [k for k in configured_keys() if k.get("enabled")]
         _key_state = ("on (%d key(s) from the panel)" % len(_panel_keys)) if _panel_keys else "on (--api-key)"

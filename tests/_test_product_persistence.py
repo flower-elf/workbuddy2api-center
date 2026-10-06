@@ -1,13 +1,6 @@
-"""An account's outbound identity must survive a restart (issue #76).
+"""账号的对外身份必须跨重启保留(issue #76):加载读取凭据文件里的 product 字段,面板选择器与 429 身份切换写入的值重启后仍生效。
 
-The panel's WB / VSC / CLI selector - and, when enabled, the 429 identity
-switch - changes account.product, and every save path writes that value into
-the credential file. Loading used to ignore it: __init__ hard-wired the
-default and parked the stored value in a `saved_product` field that nothing in
-the repository ever read, so a switch looked saved on disk and silently
-reverted on every restart.
-
-No network: accounts are built from dicts and written to a temp directory.
+不联网:账号由字典构造,写入临时目录。
 """
 import json
 import os
@@ -36,7 +29,6 @@ def check(label, cond, extra=""):
 
 
 def credential(product="__missing__", **extra):
-    """One credential file as it sits on disk, before Account sees it."""
     data = {"uid": "u-product-1", "domain": "www.workbuddy.ai", "realm": "intl",
             "accessToken": ""}
     if product != "__missing__":

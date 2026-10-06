@@ -21,8 +21,7 @@ import {
 } from './logic.js';
 
 /**
- * 新建 / 编辑密钥。
- * saveEntry(entry) 由页面提供：提交成功就正常返回，失败必须抛出，弹窗据此显示错误并保持打开。
+ * 新建 / 编辑密钥；saveEntry(entry) 由页面提供，提交失败必须抛出，弹窗据此显示错误并保持打开。
  * onCreated(entry) 只在新建成功后调用，用明文密钥打开接入信息弹窗。
  */
 export function openKeyDialog({ row = null, saveEntry, onCreated }) {
@@ -32,7 +31,7 @@ export function openKeyDialog({ row = null, saveEntry, onCreated }) {
   // 出口 -> 启用中的模型 ID；下拉只列出这些模型。
   const enabledModels = {};
 
-  /** 当前出口可选的模型：绑定了出口只列该出口，跟随默认出口时列出两个出口的并集，已添加的不再列出。 */
+  /** 当前出口可选的模型：绑定出口只列该出口，跟随默认出口时取两个出口的并集，已添加的不再列出。 */
   function pickableModels() {
     const realms = form.realm ? [form.realm] : ['intl', 'cn'];
     const ids = new Set();

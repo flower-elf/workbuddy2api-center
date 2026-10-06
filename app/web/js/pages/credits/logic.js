@@ -1,10 +1,9 @@
-// 积分页的纯逻辑：套餐明细的规整、按来源归并、汇总与到期文案。
-// 只依赖 core/format.js 与账号页逻辑，可以在 Node 里直接测试。
+// 积分页的纯逻辑：套餐明细规整、按来源归并、汇总与到期文案；只依赖 core/format.js 与账号页逻辑，可以在 Node 里直接测试。
 
 import { compareText, fmtNumber, toMillis } from '../../core/format.js';
 import { creditAgeText, expiryCountdown, urgencyTone } from '../accounts/logic.js';
 
-/** 一笔套餐：字段名与凭证文件里 credits.packages 的条目一致。 */
+/** 数字归一化：非法或非正数按 0 处理。 */
 function numberOrZero(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
@@ -16,9 +15,8 @@ function millis(value) {
 }
 
 /**
- * 单笔套餐的规整。非对象与全零条目返回 null：凭证文件是手改得动的，脏数据
- * 不该让整页无法渲染，而没有额度的空条目也没有可看的内容。
- * 每个入口都过这一道，调用方给原始条目或规整后的条目结果都一样。
+ * 单笔套餐的规整；非对象与全零条目返回 null，避免凭证文件里的脏数据影响整页渲染。
+ * 重复规整同一份条目结果一致。
  */
 function normalisePackage(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -64,10 +62,7 @@ export function stateBadge(state) {
   return { text: '可用', tone: 'success' };
 }
 
-/**
- * 按来源归并套餐：同一个来源可能分多笔到账（例如连着领了几次同一个裂变包），
- * 凑成一行读起来才看得清这个来源一共给了多少、剩下多少。
- */
+/** 按来源归并套餐：同一来源的多笔到账合成一行，便于看该来源一共给了多少、剩下多少。 */
 export function groupPackages(packages, now = Date.now()) {
   const groups = new Map();
   for (const raw of packages || []) {
@@ -113,10 +108,7 @@ export function groupPackages(packages, now = Date.now()) {
     || compareText(x.name, y.name));
 }
 
-/**
- * 归并行的展开键：同一个来源（例如裂变包）在每个账号下都会出现一行，键里要带上
- * 账号的 uid，否则展开一个账号的同名行会让其他账号一起展开。
- */
+/** 归并行的展开键：键里必须带账号 uid，否则展开一个账号的同名行会连带展开其他账号。 */
 export function creditRowKey(account, group) {
   return String((account && account.uid) || '') + '\u0000' + String((group && group.key) || '');
 }

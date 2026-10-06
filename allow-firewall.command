@@ -2,13 +2,13 @@
 # ===========================================================
 #  macOS counterpart of allow-firewall.bat (LAN mode helper)
 #
-#  macOS does not use Windows Firewall rules. The built-in
-#  application firewall asks for permission the first time a
-#  program listens on a network port - choose [Allow] then.
+#  macOS does not use Windows Firewall rules. Its application
+#  firewall asks for permission the first time a program listens
+#  on a port - choose [Allow] then.
 #
-#  This script explains the situation, prints the current
-#  firewall state and can add the Python interpreter used by
-#  the proxy to the allowed list (asks for your password).
+#  This script prints the current firewall state and can add the
+#  proxy's Python interpreter to the allowed list (asks for your
+#  password).
 #
 #  Usage: double-click, or  ./allow-firewall.command [port]
 # ===========================================================

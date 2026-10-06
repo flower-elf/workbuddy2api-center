@@ -1,5 +1,5 @@
-/* 用量页纯逻辑：查询串组装、账号与密钥用量行、模型矩阵的行与合计、筛选条件生成与失效清理。
- * 关键行为：合计在筛选生效时只用可见行重算、延迟与速度按样本数加权、失效筛选就地清空。 */
+/* 用量页纯逻辑：查询串组装、账号与密钥用量行、模型矩阵的行与合计、筛选条件与失效清理。
+ * 关键行为：合计只在可见行上重算，延迟与速度按样本数加权。 */
 import assert from 'node:assert/strict';
 import {
   RANGES, rangeLabel, scopeRealm, scopeText, buildQuery, trendQuery, trendGranularity, TREND_MODES, trendSeries,
@@ -46,7 +46,7 @@ function fixtures() {
   };
 }
 
-// ---- 查询串：三个端点共用一份窗口，自定义区间只带上填了的那一侧
+// ---- 查询串：三个端点共用窗口，自定义区间只带填了的一侧
 assert.equal(buildQuery({ realm: 'intl', range: 'today' }), '?realm=intl&range=today');
 assert.equal(buildQuery({ realm: 'all', range: 'custom', since: null, until: null }), '?realm=all&range=custom');
 assert.equal(buildQuery({ realm: 'cn', range: 'custom', since: 1700000000, until: null }), '?realm=cn&range=custom&since=1700000000');
@@ -61,7 +61,7 @@ assert.notEqual(scopeText(false, 'cn'), scopeText(false, 'intl'));
 assert.equal(rangeLabel('week'), RANGES[1].label);
 assert.equal(rangeLabel('不存在'), RANGES[0].label, '未知范围退回默认项');
 
-// ---- 未筛选：合计就是端点整体的口径
+// ---- 未筛选时合计取端点整体口径
 const base = fixtures();
 let built = buildMatrix(base.usage, base.perf, {});
 assert.equal(built.summary.filtering, false);
@@ -89,7 +89,7 @@ assert.equal(deepseekRow.share, Math.round((5800 / 8300) * 100), '占比按表�
 assert.equal(built.rows.find((r) => r.id === 'glm-5.3').share, Math.round((2500 / 8300) * 100));
 assert.equal(built.rows.reduce((sum, r) => sum + r.share, 0), 100, '各行占比加起来正好 100');
 
-// ---- 占比分配：零头给余数最大的行，合计始终是 100
+// ---- 占比分配：零头给余数最大的行，合计 100
 assert.deepEqual(allocateShares([7, 11, 13, 17]), [15, 23, 27, 35]);
 assert.deepEqual(allocateShares([101, 99]), [51, 49], '两个近乎对半的行相差 1');
 assert.deepEqual(allocateShares([1, 1, 1]), [34, 33, 33], '余数相同时给靠前的行');
@@ -97,7 +97,7 @@ assert.deepEqual(allocateShares([1, 0, 0]), [100, 0, 0]);
 assert.deepEqual(allocateShares([0, 0]), [0, 0], '没有用量时都是 0');
 assert.deepEqual(allocateShares([]), []);
 
-// ---- 同一模型的多个账号各自成行：第一行带这个模型的账号数
+// ---- 同一模型的多个账号各自成行
 const splitUsage = {
   requests: 2, total_tokens: 300, prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0,
   by_model: { 'm-one': stat(2, 300, 0, 0, { accounts: { 'acct-A': 1, 'acct-B': 1 } }) },
@@ -111,7 +111,7 @@ assert.deepEqual(splitBuilt.rows.map((r) => r.first), [true, false]);
 assert.deepEqual(splitBuilt.rows.map((r) => r.splitAccounts), [2, 2], '两行都记着账号数，只有第一行显示');
 assert.equal(built.rows[0].split, false, '单账号模型不算分行');
 
-// ---- 按模型筛选：合计只用可见行重算
+// ---- 按模型筛选
 const onlyGlm = buildMatrix(base.usage, base.perf, { model: 'glm-5.3' });
 assert.equal(onlyGlm.summary.filtering, true);
 assert.notEqual(onlyGlm.summary.label, built.summary.label, '筛选后合计行的标题与全量不同');
@@ -122,7 +122,7 @@ assert.equal(onlyGlm.summary.ttftAvg, 900);
 assert.equal(onlyGlm.modelCount, 1);
 assert.equal(onlyGlm.rows[0].share, 100, '筛选后只剩这一行，占比 100');
 
-// ---- 按账号筛选：其它账号的行消失，合计跟着变
+// ---- 按账号筛选
 const onlyA = buildMatrix(base.usage, base.perf, { account: 'acct-A' });
 assert.equal(onlyA.rows.length, 1);
 assert.equal(onlyA.rows[0].acct, 'acct-A');
@@ -130,7 +130,7 @@ assert.equal(onlyA.summary.requests, 3);
 assert.equal(onlyA.summary.totalTokens, 5800);
 assert.equal(onlyA.summary.errors, 1);
 
-// ---- 筛不出任何行：空结果而不是整张表消失
+// ---- 筛不出行时返回空结果
 const none = buildMatrix(base.usage, base.perf, { account: 'acct-B', model: 'deepseek-v4.1-flash' });
 assert.deepEqual(none.rows, []);
 assert.equal(none.modelCount, 0);
@@ -149,7 +149,7 @@ delete layered.perf.by_model_realm['deepseek-v4.1-flash'].intl;
 layered.perf.by_model['deepseek-v4.1-flash'].ttft_ms = S(333);
 assert.equal(buildMatrix(layered.usage, layered.perf, {}).rows.find((r) => r.id === 'deepseek-v4.1-flash').ttftAvg, 333);
 
-// ---- 筛选后的合计：延迟与速度按样本数加权，冷门行不能压过主力行
+// ---- 筛选后的合计：冷门行不能压过主力行
 const weighted = fixtures();
 const many = stat(9, 900, 500, 400, { accounts: { 'acct-B': 9 } });
 weighted.usage.by_model_acct['glm-5.3'].cn['acct-C'] = many;
@@ -160,7 +160,7 @@ const filtered = buildMatrix(weighted.usage, weighted.perf, { model: 'glm-5.3' }
 assert.equal(filtered.rows.length, 2);
 assert.equal(Math.round(filtered.summary.tps * 10) / 10, 19, '加权平均为 19，直接平均会得到 55');
 
-// ---- 被筛选掉的账号不会出现在行里，符合筛选后合计行的说明
+// ---- 被筛选掉的账号不出现在行里
 assert.equal(filtered.summary.accountsLabel, '已筛选');
 assert.equal(buildMatrix(base.usage, base.perf, {}).summary.accountsLabel, '全部账号');
 
@@ -174,13 +174,13 @@ junk.usage.by_model['无调用的模型'] = stat(0, 0, 0, 0);
 assert.deepEqual(matrixOptions(junk.usage).models, ['deepseek-v4.1-flash', 'glm-5.3'], '被占位名与零调用过滤掉');
 assert.deepEqual(matrixOptions(null), { accounts: [], models: [] });
 
-// ---- 数据换了范围后，失效的筛选被清空，仍然存在的保留
+// ---- 换范围后失效的筛选被清空
 assert.deepEqual(reconcileFilters({ account: 'acct-A', model: 'glm-5.3' }, options), { account: 'acct-A', model: 'glm-5.3' });
 const narrowed = matrixOptions({ by_model: { 'deepseek-v4.1-flash': stat(1, 1, 1, 0) }, by_model_acct: { 'deepseek-v4.1-flash': { intl: { 'acct-A': stat(1, 1, 1, 0) } } } });
 assert.deepEqual(reconcileFilters({ account: 'acct-A', model: 'glm-5.3' }, narrowed), { account: 'acct-A', model: '' });
 assert.deepEqual(reconcileFilters({ account: '已删除的账号', model: 'glm-5.3' }, options), { account: '', model: 'glm-5.3' });
 
-// ---- 账号用量行：丢掉零调用的未归属桶，按 Token 降序，模型分布也按 Token 降序
+// ---- 账号用量行：零调用未归属桶丢掉，按 Token 降序
 const rows = accountRows({
   accounts: [
     { uid: '(unattributed)', nickname: '(unattributed)', realm: 'intl', window: stat(0, 0, 0, 0), all_time: stat(0, 0, 0, 0), window_models: {} },
@@ -193,11 +193,11 @@ assert.deepEqual(rows.map((r) => r.uid), ['big', 'small']);
 assert.deepEqual(rows[0].models.map((m) => m.id), ['a', 'b']);
 assert.equal(rows[0].credits.remain, 500);
 assert.deepEqual(accountRows(null), []);
-// 未归属桶在窗口内没有调用但在历史上有，说明它是真实记录，保留
+// 未归属桶窗口内无调用但历史有记录，按真实记录保留
 const kept = accountRows({ accounts: [{ uid: '(unattributed)', window: stat(0, 0, 0, 0), all_time: stat(4, 40, 20, 20), window_models: {} }] });
 assert.equal(kept.length, 1);
 
-// ---- 密钥用量行：零调用的密钥不进表，但会在下沿被点名
+// ---- 密钥用量行：零调用的密钥不进表，在下沿点名
 const keys = keyRows({
   keys: [
     { key_id: 'k1', key_name: '客服组', window: stat(3, 300, 200, 100, { cache_hit_pct: 25, ttft_ms_avg: 700 }), all_time: stat(9, 900, 600, 300) },
@@ -217,7 +217,7 @@ assert.deepEqual(idleKeyNames({ keys: [
 ] }), ['闲置密钥', 'panel'], '没有名字的密钥用 id 显示');
 assert.deepEqual(keyRows(null), []);
 
-// ---- 趋势序列：请求数用左轴、Token 用右轴、失败数跟随请求数；只画一条时不留空轴
+// ---- 趋势序列：请求数左轴、Token 右轴、失败数跟随请求数
 const buckets = [
   { label: '10-01', requests: 3, errors: 1, total_tokens: 1200 },
   { label: '10-02', requests: 5, errors: 0, total_tokens: 3400 },

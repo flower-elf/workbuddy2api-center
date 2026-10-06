@@ -1,5 +1,4 @@
-// 密钥页的纯逻辑：状态判定、表单校验、请求体组装与客户端接入片段生成。
-// 只依赖 core/format.js，可在 Node 里直接测试；界面状态与请求都在 keys.js / keys/dialogs.js。
+// 密钥页的纯逻辑：状态判定、表单校验、请求体组装与客户端接入片段；界面状态与请求在 keys.js / keys/dialogs.js。
 import { fmtNumber, fmtCredit, fmtDate, fmtAgo, fmtUntil } from '../../core/format.js';
 
 export const KEY_STATUSES = ['ok', 'disabled', 'expired', 'quota_exceeded'];
@@ -70,10 +69,7 @@ export function quotaExceeded(row) {
   return credit > 0 && usage.credit >= credit;
 }
 
-/**
- * 状态以服务端的 status 为准；服务端还没给出该字段时按同一套口径推导，
- * 免得界面把已过期或超配额的密钥画成正常。
- */
+/** 状态以服务端的 status 为准；缺失时按同一套口径推导，避免把已过期或超配额的密钥画成正常。 */
 export function deriveKeyStatus(row, nowMs = Date.now()) {
   if (row && KEY_STATUSES.includes(row.status)) return row.status;
   if (!row || row.enabled === false) return 'disabled';
@@ -131,7 +127,7 @@ export function modelLimitText(row) {
   return list.length ? `限 ${list.length} 个模型` : '全部模型';
 }
 
-/** 限制单元格的悬停明细，把条目的实际内容写全。 */
+/** 限制单元格的悬停明细。 */
 export function limitTitle(row) {
   const ips = ipList(row);
   const models = modelPatterns(row);
@@ -159,7 +155,7 @@ export function lastUsedText(row, nowMs = Date.now()) {
   return usage.lastUsedAt ? fmtAgo(usage.lastUsedAt, nowMs) : '从未使用';
 }
 
-/** 表头的状态汇总；总数用于「新建密钥」旁的计数说明。 */
+/** 各状态的密钥计数。 */
 export function summarizeKeys(rows, nowMs = Date.now()) {
   const out = { total: 0, ok: 0, disabled: 0, expired: 0, quota_exceeded: 0 };
   for (const row of rows || []) {
@@ -170,9 +166,8 @@ export function summarizeKeys(rows, nowMs = Date.now()) {
 }
 
 /**
- * 认证状态说明。返回 { kind, text }：
- * kind 为 none 表示当前不校验 Key；startup 表示校验来自启动参数里的 Key；
- * panel 表示由本页的密钥列表把关。
+ * 认证状态说明，返回 { kind, text }：kind 为 none 表示不校验 Key，
+ * startup 表示由启动参数把关，panel 表示由本页的密钥列表把关。
  */
 export function authSummary(view) {
   if (view && view.auth_required === false) {
@@ -181,7 +176,7 @@ export function authSummary(view) {
   const rows = (view && view.api_keys) || [];
   // 服务端只要有一把「启用」的密钥就要求带 Key，过期或超配额的那些同样把门。
   const enabled = rows.filter((row) => row && row.enabled !== false).length;
-  // 列表里一旦有密钥，接口只认这些密钥，启动参数里那把会被忽略——先后顺序不能反。
+  // 列表里一旦有密钥，接口只认这些密钥，启动参数里那把会被忽略。
   if (enabled) return { kind: 'panel', text: `已启用 ${enabled} 个密钥，接口会进行鉴权。` };
   if (rows.length) {
     return view && view.api_key_set
@@ -334,8 +329,8 @@ export function formFromRow(row, nowMs = Date.now()) {
 const MAX_EXPIRY_DAYS = 3650;
 
 /**
- * 校验表单；返回错误文案，空串表示通过。
- * 校验口径与服务端一致：新密钥必须填写内容且不短于 4 个字符，天数与配额是非负整数。
+ * 表单校验：返回错误文案，空串表示通过。
+ * 口径与服务端一致：密钥内容至少 4 个字符，有效期天数与配额是非负整数。
  */
 export function validateKeyForm(form) {
   const value = String(form.keyValue || '').trim();
@@ -384,8 +379,8 @@ export function buildKeyEntry(form, nowMs = Date.now()) {
 }
 
 /**
- * 服务端返回的行 → 提交载荷。旧字段照旧提交，新字段存在时才带，
- * 这样后端还没实现新字段时不会把已有值覆盖成空。
+ * 服务端返回的行 → 提交载荷：旧字段照旧提交，新字段存在时才带，
+ * 避免后端还没实现新字段时把已有值覆盖成空。
  */
 export function keyRowPayload(row) {
   const payload = {

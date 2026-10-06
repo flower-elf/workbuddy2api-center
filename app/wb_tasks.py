@@ -1,10 +1,7 @@
 """wb_tasks.py —— 国内版成长任务与日常福利自动化
 
-包含功能：
-1. 成长任务查询、批量接取 (accept)、构造事件上报点亮 (report)、领奖入账 (claim)。
-2. 连续打卡 (streak) 与能量 (energy) 余额查询。
-3. 猫猫旅行 (buddy travel) 状态查询、自动派出与自动领奖。
-4. 严格遵守 >= 1.0s 防风控间隔，并使用 wb_fingerprint 的稳定设备指纹。
+成长任务查询 / 批量接取 / 事件上报 / 领奖，连续打卡与能量余额查询，猫猫旅行状态
+查询、自动派出与自动领奖；请求之间保持 >= 1.0s 间隔，设备指纹取自 wb_fingerprint。
 """
 import json
 import re
@@ -27,9 +24,8 @@ _log = lambda msg: None
 def set_logger(fn):
     """Route task diagnostics to the caller's logger.
 
-    The growth endpoints swallow their errors so one dead endpoint cannot
-    abort a whole cycle. Without a logger those failures are invisible, and an
-    upstream change looks identical to "no tasks today".
+    The growth endpoints swallow their errors, so without a logger a dead
+    endpoint looks identical to "no tasks today".
     """
     global _log
     _log = fn or (lambda msg: None)
@@ -58,9 +54,9 @@ TASK_SPECS = {
 # ---------------------------------------------------------------------------
 # 逆向修复常量 (2026-09 实测校准)
 # ---------------------------------------------------------------------------
-# 这些任务上游只认桌面客户端的真实行为信号 (jump_url 均为 workbuddy:// 深链,
-# 需要真实点击进入对应页面)。伪造 /v2/report 事件会被忽略或被记为 heartbeat,
-# 进度永远是 0/1, claim 必然返回 400 "task not completed"。诚实地跳过并给出深链。
+# 这些任务上游只认桌面端真实行为信号 (jump_url 均为 workbuddy:// 深链, 需要真实
+# 点击进入对应页面): 伪造 /v2/report 事件会被忽略或被记为 heartbeat, 进度永远是
+# 0/1, claim 必然返回 400 "task not completed"。
 DESKTOP_ONLY_TASKS = {
     "RichMeow_Chat": "在桌面端发起 1 次对话",
     "Library_read": "在桌面端打开「资料库」并读完介绍文档",
@@ -71,8 +67,8 @@ DESKTOP_ONLY_TASKS = {
 # 夜猫子任务只在 23:00-08:00 上报才计数, 且每天 1 次、累计 3 天。
 NIGHT_TASK_CODES = {"black_cat"}
 
-# 上游按中国标准时间判定夜猫子窗口与签到日界; 中国大陆不使用夏令时, 所以固定按
-# UTC+8 换算, 不跟随运行机器的本地时区。
+# 上游按中国标准时间判定夜猫子窗口与签到日界; 中国大陆不使用夏令时, 固定按
+# UTC+8 换算, 不跟随本机时区。
 CST_OFFSET = 8 * 3600
 
 
@@ -86,8 +82,7 @@ def in_night_window():
     return h >= 23 or h < 8
 
 # 专家/团队事件必须彼此不同: 桌面端 appendGrowthEvent 按 (eventCode, id) 去重,
-# 上游同样只按不同 id 累加进度 —— 重复发同一个 id 进度永远不动。
-# 下列 id 已在 2026-09 实测中验证可推进任务进度。
+# 上游也只按不同 id 累加进度, 重复发同一个 id 进度永远不动 (下列 id 2026-09 实测可用)。
 EXPERT_ID_POOL = [
     ("ex_PZw8Gu81HfN4", "运维工程师"), ("ex_ROsDtJbzADFV", "产品经理"),
     ("ex_SMUnl0nJbPix", "UI设计师"), ("ex_ZTR062oVBOCW", "数据分析师"),
@@ -100,7 +95,7 @@ EXPERT_ID_POOL = [
     ("ex_KzqKQguubrNQ", "内容创作专家"), ("ex_2cvvUZQhDyeJ", "腾讯轻量云专家"),
 ]
 # 团队 id 来自官方专家清单 expert_center.json (expertType=team, 共 53 个),
-# 前 3 个已在 2026-09 实测验证可推进 Expert_team_use_3。
+# 前 3 个 2026-09 实测可推进 Expert_team_use_3。
 TEAM_ID_POOL = [
     ("CloudOpsTeam", "运维专家团队"), ("CloudContentTeam", "内容专家团队"),
     ("CloudDevTeam", "研发专家团队"), ("ProductStrategyTeam", "产品战略团队"),
@@ -177,10 +172,8 @@ def accept_tasks(account, codes, chunk=20):
     """批量接取任务。
 
     上游按批返回 results, 单个任务可能 status=accepted / already_accepted /
-    其它失败原因。过去这里只返回 bool 且吞掉异常, 接取失败时上层完全看不见,
-    于是后续上报的事件全部作用在未接取的任务上 —— 进度永远 0, 领奖必然
-    "task not completed", 表现就是"接取了一堆但一个都没点亮"。
-    现在返回 {"ok": bool, "accepted": [...], "failed": [...], "msg": str}。
+    其它失败原因。返回 {"ok": bool, "accepted": [...], "failed": [...], "msg": str}；
+    接取失败必须让上层看见, 否则后续上报全部作用在未接取的任务上, 进度永远 0。
     """
     out = {"ok": True, "accepted": [], "failed": [], "msg": ""}
     if not codes:
@@ -358,9 +351,8 @@ def build_event(account, kind, idx=0, expert=None):
 def report_events(account, events, base=None):
     """向上游上报事件数组。
 
-    默认发 copilot.tencent.com (chat 侧) —— 与桌面客户端真实上报地址一致
-    (桌面 NetLog: POST https://copilot.tencent.com/v2/report), 2026-09 实测
-    该侧事件会实时推进成长任务进度。
+    默认发 copilot.tencent.com (chat 侧), 与桌面客户端真实上报地址一致
+    (桌面 NetLog: POST https://copilot.tencent.com/v2/report), 2026-09 实测可推进进度。
     """
     if base is None:
         base = CHAT_BASE
@@ -462,7 +454,7 @@ def run_growth_tasks(account, gap=1.0):
         time.sleep(gap)
         tasks = fetch_growth_tasks(account)
         # 复核一次: 上游偶尔会瞬时拒绝整个批次, 复查后仍处于未接取的再补一次,
-        # 否则后面所有上报都作用在未接取的任务上 —— 进度全是 0。
+        # 否则后面所有上报都作用在未接取的任务上, 进度全是 0。
         still = [t["task_code"] for t in tasks if t["status"] == "not_accepted"]
         if still:
             logs.append(f"仍有 {len(still)} 个未接取，重试接取一次...")
@@ -494,9 +486,8 @@ def run_growth_tasks(account, gap=1.0):
         if status == "claimed":
             continue
 
-        # 已完成的任务先领奖 —— 桌面端/夜间任务也可能被真实操作完成
-        # (例如用户自己在桌面端用了一次, 或夜里调度器点亮了), 这类任务必须
-        # 先结算, 不能因为"只能靠真实操作"就直接跳过丢掉奖励。
+        # 已完成的任务先领奖: 桌面端/夜间任务也可能被真实操作完成, 这类任务不能
+        # 因为"只能靠真实操作"就直接跳过丢掉奖励。
         if status == "completed" or cur >= tgt:
             res = claim_task(account, code)
             if res.get("ok"):
@@ -549,8 +540,8 @@ def run_growth_tasks(account, gap=1.0):
             logs.append(f"任务 [{spec['name']}] 部分事件上报失败（上游拒绝），继续尝试领奖")
         time.sleep(1.5)
 
-        # 等上游把进度入账再领奖。进度通常 1-3 秒就可见, 因此先快查几次;
-        # 只有确实在动才继续等, 免得每个卡住的任务都空等 20 秒 (整轮要几分钟)。
+        # 等上游把进度入账再领奖: 进度通常 1-3 秒可见, 先快查几次, 只有确实在动
+        # 才继续等, 免得每个卡住的任务都空等 20 秒。
         prog = cur
         for attempt in range(6):
             fresh = next((x for x in fetch_growth_tasks(account) if x["task_code"] == code), None)

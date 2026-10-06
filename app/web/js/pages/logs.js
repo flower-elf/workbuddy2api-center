@@ -1,5 +1,4 @@
-// 运行日志页：终端样式的实时日志面板。
-// 标签页在前台时按 LOG_POLL_MS 增量读取 /logs，暂停监听、滚动到底自动跟随，复制与导出按当前筛选。
+// 运行日志页：终端样式的实时日志面板；标签页在前台时按 LOG_POLL_MS 增量读取 /logs，暂停监听、滚动到底自动跟随。
 import { html, render, nothing, repeat } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { getJSON, postJSON, downloadFile } from '../core/api.js';

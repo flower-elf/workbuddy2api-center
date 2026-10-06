@@ -1,13 +1,8 @@
-"""看板的手机与桌面布局检查（Playwright + Firefox，手动运行）。
+"""看板的手机与桌面布局检查（Playwright + Firefox，手动运行）：合成数据、不碰真实凭证，判定只依据 DOM 属性。
 
-只用合成数据（假账号、假用量），不碰真实凭证：在临时目录造数据，启动一个
-独立端口的网关，再用手机宽度与桌面宽度逐页读取 DOM 事实。
+截图保存在系统临时目录的 wb-mobile-shots 下；用法：
 
-用法：
-    python tests/manual/_mobile_check.py          # 运行全部检查
-    python tests/manual/_mobile_check.py dock     # 只运行名字里含 dock 的检查
-
-截图保存在系统临时目录的 wb-mobile-shots 下供人工查看；判定只依据 DOM 属性。
+    python tests/manual/_mobile_check.py
 """
 
 import json
@@ -34,7 +29,7 @@ BASE = ""
 
 
 def free_port():
-    """Pick a free loopback port so we never collide with another service."""
+    """Pick a free loopback port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
@@ -217,9 +212,8 @@ HOST_CANDIDATES = ("127.0.0.1", "::")
 def start_server():
     """Start the gateway under test and wait until it answers /panel/status.
 
-    The bind host is probed, not assumed: upstream binds IPv4 only, while a
-    deployment that patched in a dual-stack listener only accepts IPv4
-    connections on the wildcard socket. The first candidate that answers wins.
+    The bind host is probed: upstream binds IPv4 only, and a dual-stack listener
+    only accepts IPv4 connections on the wildcard socket.
     """
     for host in HOST_CANDIDATES:
         proc = subprocess.Popen(
@@ -286,7 +280,7 @@ def run_checks(filter_name):
     with sync_playwright() as p:
         browser = p.firefox.launch(headless=True)
 
-        # ---------- 手机宽度 ----------
+        # 手机宽度
         page = browser.new_page(viewport={"width": 390, "height": 844})
         login(page)
 
@@ -352,7 +346,7 @@ def run_checks(filter_name):
             page.screenshot(path=os.path.join(SHOTS, "phone-logs.png"), full_page=True)
         page.close()
 
-        # ---------- 桌面宽度 ----------
+        # 桌面宽度
         dpage = browser.new_page(viewport={"width": 1280, "height": 800})
         login(dpage)
         if wanted(filter_name, "desktop"):

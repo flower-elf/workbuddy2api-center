@@ -11,19 +11,16 @@ import wb_proxy as P
 class FingerprintSanitizationTests(unittest.TestCase):
     def test_omo_junior_fingerprint_neutralized(self):
         fp = "Sisyphus-Junior - Focused executor from OhMyOpenCode"
-        # 1. Exact string rewritten
         self.assertEqual(P.sanitize_text(fp), "Sisyphus-Junior - Focused executor")
 
-        # 2. Case insensitive
         self.assertEqual(P.sanitize_text(fp.lower()), "Sisyphus-Junior - Focused executor")
 
-        # 3. Embedded in context
         text = f"You are a subagent. {fp}. Complete the task."
         expected = "You are a subagent. Sisyphus-Junior - Focused executor. Complete the task."
         self.assertEqual(P.sanitize_text(text), expected)
 
     def test_omo_partial_tokens_untouched(self):
-        # Tokens alone should not be stripped or modified
+        # Tokens alone stay untouched
         self.assertEqual(P.sanitize_text("Sisyphus-Junior alone"), "Sisyphus-Junior alone")
         self.assertEqual(P.sanitize_text("from OhMyOpenCode alone"), "from OhMyOpenCode alone")
         self.assertEqual(P.sanitize_text("Sisyphus master agent"), "Sisyphus master agent")

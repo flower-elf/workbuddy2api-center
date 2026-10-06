@@ -5,7 +5,7 @@ import { hrefFor } from '../core/router.js';
 import { readStore, writeStore } from '../core/storage.js';
 
 // 底部浮动菜单栏：按分组排列页面入口与快捷动作；鼠标靠近时图标放大。
-// 桌面端可长按空白处拖动位置（「悬浮」模式），「固定」模式始终贴底居中；窄屏收起为右下角按钮。
+// 「悬浮」模式可长按空白处拖动位置，「固定」模式始终贴底居中；窄屏收起为右下角按钮。
 const POSITION_KEY = 'wb-dock-position';
 const MODE_KEY = 'wb-dock-mode';
 const MARGIN = 16;
@@ -55,8 +55,7 @@ function isActive(item) {
   if (!current) return false;
   if (current.path === item.path) return true;
   if (current.dock || !current.section) return false;
-  // 不在菜单栏里的页面高亮它所属分组的第一个入口：任务与积分同属账号组，
-  // 但菜单栏里代表这一组的是账号。
+  // 不在菜单栏里的页面，高亮它所属分组的第一个菜单入口。
   const head = ROUTES.find((route) => route.dock && route.section === current.section);
   return Boolean(head) && head.path === item.path;
 }

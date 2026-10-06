@@ -1,22 +1,16 @@
 # -*- coding: utf-8 -*-
 """反代代跑 web_search / web_fetch（开关在 wb_proxy.LOCAL_WEB_TOOLS）
 
-背景：Codex App 会宣告 web_search 这种 Responses 的服务器端工具，但 WorkBuddy
-上游没有任何搜索服务——v1.5.3 的 revert 已经实测过，直接把 web_search /
-web_search_preview / web_fetch 丢给 chat endpoint，模型的回答跟完全不给工具
-一样（零个 tool call）。所以没有现成的执行器可以转接，只能由反代自己跑。
+WorkBuddy 上游没有任何搜索服务：客户端宣告的 web_search / web_search_preview /
+web_fetch 直接丢给 chat endpoint 时模型不会产生 tool call，所以只能由反代自己
+跑（issue #43）。三条现有约定：
 
-v1.5.0 ~ 1.5.2 做过同一件事，被 revert（issue #43）。三个缺陷都在这里修掉：
-
-  1. 只认 args["query"] 这个字符串。模型改送 queries 数组时会收到一句「你没问
-     问题」，于是必然重试、必然把回合数耗光。-> query_args() 同时接受
-     query / queries / q，并把多个查询合并成一次搜索。
-  2. 去重只看已展开成 chat 形状的 function，漏掉客户端原本那份服务器端宣告，
-     上游因此同时看到两个同名的 web_search。-> install_tool_defs() 先把同名
-     项目全部拿掉，再放进唯一一份我们的定义。
-  3. 回合用尽时合成一个 resp_wrapup（status=completed、output=[]）收尾，把
-     失败伪装成正常结束，客户端看到的是「讲到一半断掉」。-> 这里不合成任何
-     东西：调用端在最后一轮把工具收回，让模型自己用文字收尾。
+  1. query_args() 同时接受 query / queries / q，多个查询合并成一次搜索；只认
+     args["query"] 时模型改送 queries 会被回一句「你没问问题」，重试到回合耗光。
+  2. install_tool_defs() 先把同名项目全部拿掉，再放进唯一一份我们的定义，否则
+     上游会同时看到两个同名的 web_search。
+  3. 回合用尽时不合成 resp_wrapup：调用端在最后一轮把工具收回，让模型自己用文字
+     收尾，不把失败伪装成正常结束。
 
 搜索后端是 DuckDuckGo 的 HTML 版（不需要 API key）。任何失败都回一句可读的
 错误给模型，不假造结果。只用 Python 标准库。
@@ -54,7 +48,7 @@ MAX_RESULTS = 10
 MAX_FETCH_CHARS = 100000
 HTTP_TIMEOUT = 20              # 单次连接/读的超时
 FETCH_DEADLINE = 40            # 一次抓取（连接、重定向、读完）的总时限
-MAX_RESPONSE_BYTES = 4 << 20   # 响应体字节上限：HTML 够撑出十万字符正文，内存也可控
+MAX_RESPONSE_BYTES = 4 << 20   # 响应体字节上限：足够撑出十万字符正文，内存也可控
 MAX_REDIRECTS = 5
 READ_CHUNK = 65536
 REDIRECT_STATUS = (301, 302, 303, 307, 308)
@@ -148,9 +142,8 @@ def client_wants_web(tools):
 def install_tool_defs(chat_tools, wants):
     """把客户端的网络工具宣告换成我们的 function。
 
-    同名项目（服务器端的 {"type": "web_search"}、客户端自己带的 function、
-    以及上一轮从我们这里学到的定义）一律先移除，只留唯一一份；否则上游会
-    同时看到两个 web_search，模型会挑错那个去调用。
+    同名项目一律先移除（服务器端 type、客户端 function、上一轮学到的定义），
+    只留唯一一份，否则上游会同时看到两个 web_search。
     """
     names = set()
     if wants.get("search"):
@@ -185,9 +178,8 @@ def is_internal_tool(name):
 def query_args(args):
     """从工具参数取出查询字符串。
 
-    旧版只读 args["query"] 这个字符串，模型改送 queries 数组时就会被回一句
-    「你没问问题」——issue #43 就是这样一路重试到回合用尽。这里接受
-    query / queries / q，数组会用 " or " 接起来。
+    接受 query / queries / q，数组会用 " or " 接起来；只认 args["query"] 时
+    模型改送 queries 会被回一句「你没问问题」，重试到回合用尽（issue #43）。
     """
     if not isinstance(args, dict):
         return ""
@@ -250,8 +242,8 @@ def _remaining(deadline):
 def _read_body(resp, sock, limit, deadline):
     """分块读响应体：读满 limit 再探一个字节就知道有没有更多，多了立刻停。
 
-    read1 每次最多做一次底层读取，慢速逐字节发送的服务器也会在每次读取之间
-    回到这里检查 deadline；read(n) 会一直凑够 n 字节才返回。
+    read1 每次最多做一次底层读取，慢速服务器也会在每次读取之间回到这里检查
+    deadline；read(n) 会一直凑够 n 字节才返回。
     """
     chunks = []
     total = 0
@@ -430,9 +422,9 @@ def search(query, num_results=5):
                               chr(10) + chr(10), ""))
 
 
-# is_private / is_global 各版本的覆盖范围不一样（3.13 改过一轮），这几段自己兜底
+# is_private / is_global 各版本的覆盖范围不一样，这几段自己兜底
 _EXTRA_BLOCKED_V4 = tuple(ipaddress.ip_network(n) for n in (
-    "192.0.0.0/24",      # IETF 协议专用，其中大部分在旧版本里不算 private
+    "192.0.0.0/24",      # IETF 协议专用，未必被 is_private 覆盖
     "192.88.99.0/24",    # 6to4 中继 anycast，已废弃
 ))
 _EXTRA_BLOCKED_V6 = tuple(ipaddress.ip_network(n) for n in (
@@ -546,11 +538,7 @@ def fetch(url, start_index=0):
 
 
 def sources_from_result(result):
-    """把搜索结果里的 (标题, 网址) 读回来。
-
-    喂给模型的是文字，但客户端要画引用来源需要结构化数据，所以在这里从我们
-    自己产出的格式反解，不必另外保存状态。
-    """
+    """从搜索结果的可读文本里反解 (标题, 网址)，供客户端展示引用来源。"""
     out = []
     pattern = r"(?m)^\d+\.\s*(.+?)\s*\n\s*(https?://\S+)\s*$"
     for m in re.finditer(pattern, str(result or "")):

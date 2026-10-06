@@ -1,11 +1,6 @@
 """评分分配：新对话按积分到期节奏与忙闲选号，瞬时故障在原地重试。
 
-三件事在这里定死：新对话的落点由「每个账号还要在到期前消耗掉多少积分」与
-「最近一小时接了多少请求」决定，已在服务的对话继续用原来的账号（前缀缓存
-不动）；同一段对话换了账号这件事有计数可查；5xx 与连接抖动先在同一个账号上
-重试，只有重试不动了才换号——换号就要在新账号上重算一次前缀。
-
-不联网：账号是内存里的对象，出站请求由打桩的 urlopen 记录。
+已在服务的对话继续用原账号；不联网：账号是内存里的对象，出站请求由打桩的 urlopen 记录。
 """
 import collections
 import io
@@ -110,11 +105,10 @@ class SettingTests(unittest.TestCase):
 
 
 class ScoredPlacementTests(unittest.TestCase):
-    """新对话的落点：按到期节奏的欠账分配，欠账相同则按忙闲。"""
+    """新对话按到期节奏的欠账分配，欠账相同则按忙闲。"""
 
     def test_picks_split_by_what_each_account_must_spend(self):
-        # uid-a 有一千积分十天到期，每天要花掉一百；uid-b 同样一千积分六十天
-        # 到期，每天只要花掉十六点七。两者都还没花，按欠账约 6 比 1 分配。
+        # uid-a 每天要花掉一百、uid-b 每天只花掉十六点七，两者都还没花，按欠账约 6 比 1 分配。
         pool = pool_with(account("uid-a", remain=1000, days=10, rate=0.0),
                          account("uid-b", remain=1000, days=60, rate=0.0))
         counts = collections.Counter(pool.pick(realm="cn").uid for _ in range(70))
@@ -135,8 +129,7 @@ class ScoredPlacementTests(unittest.TestCase):
                                    msg="义务相同时分配不均：%r" % (counts,))
 
     def test_an_account_that_is_on_pace_gives_way(self):
-        # uid-a 已经按到期节奏花掉了每天该花的积分（欠账为零），欠着一百点的
-        # uid-b 应当拿到几乎全部新对话。
+        # uid-a 欠账为零、uid-b 欠着一百点，几乎全部新对话归 uid-b。
         pool = pool_with(account("uid-a", remain=1000, days=10, rate=100.0),
                          account("uid-b", remain=1000, days=10, rate=0.0))
         self.assertEqual(pool.pick(realm="cn").uid, "uid-b")
@@ -173,8 +166,7 @@ class ScoredPlacementTests(unittest.TestCase):
         self.assertEqual(pool.routing_snapshot()["cursor_pick"], 4)
 
     def test_a_late_package_is_spread_over_its_own_term(self):
-        # 500 积分两天后到期、10000 积分三十天后到期：每天至少要花
-        # max(500/2, 10500/30) = 350，晚到期的大包不能压进两天里。
+        # 500 积分两天后到期与 10000 积分三十天后到期并存：目标取 max(500/2, 10500/30) = 350。
         a = account("uid-a")
         a.credits = packages((500, 2), (10000, 30))
         self.assertAlmostEqual(a.credit_target_per_day(), 350.0, delta=0.5)
@@ -206,8 +198,7 @@ class ScoredPlacementTests(unittest.TestCase):
                            "停用账号把份额压平了：%r" % (counts,))
 
     def test_concurrent_picks_do_not_trip_over_the_load_window(self):
-        # 概率性守护：mark_pick 与 recent_load 不加锁时，这里会出现
-        # deque mutated during iteration。
+        # 概率性守护：mark_pick 与 recent_load 不加锁时会出现 deque mutated during iteration。
         pool = pool_with(*[account("uid-%d" % i, remain=1000, days=10 + i) for i in range(6)])
         errors = []
 
@@ -262,8 +253,7 @@ class RoutingCounterTests(unittest.TestCase):
         self.assertEqual(self.pool.routing_snapshot()["bound_hit"], 1)
 
     def test_an_excluded_binding_counts_as_a_switch(self):
-        # 请求路径换号时把上一个账号排除在外，而不是先解绑：这次换号同样要
-        # 记成换号，不能被当成新对话的首次分配。
+        # 请求路径换号时把上一个账号排除在外；这次也算换号，不算首次分配。
         bound = self.pool.pick_for_session(realm="cn", session_key="s1")
         other = "uid-b" if bound.uid == "uid-a" else "uid-a"
         again = self.pool.pick_for_session(realm="cn", session_key="s1",
@@ -299,7 +289,6 @@ class DailyCreditFoldTests(unittest.TestCase):
         tokens, credits = P.daily_usage_by_account(ttl=0)
         self.assertEqual(tokens, {"acct-A": 1200, "acct-B": 300, "acct-C": 100})
         self.assertEqual(credits, {"acct-A": 0.25, "acct-B": 1.5})
-        # 原来那一份 Token 读取与折叠结果完全一致
         self.assertEqual(P.daily_tokens_by_account(ttl=0), tokens)
 
         # 追加的行接着折叠，不重读整个文件

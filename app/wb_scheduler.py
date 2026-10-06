@@ -1,10 +1,7 @@
 """wb_scheduler.py —— 后台定时调度器 (Scheduler)
 
-负责常驻后台自动执行：
-1. Token 保活 (Keepalive)：定期检查 Token 剩余寿命，不足 2 小时自动调用 Refresh Token。
-2. 每日签到 (Daily Checkin)：每日定时为所有国内版账号自动签到领积分。
-3. 猫猫旅行与日常结算 (Cat Travel & Welfare)：自动派出猫猫旅行或领取归来奖励。
-4. 状态持久化与看板展示：暴露状态、执行记录、支持手动立即触发与开关切换。
+常驻后台执行 Token 保活、国内版每日签到、猫猫旅行与夜猫子任务，
+并对外给出状态、执行记录、手动触发与开关。
 """
 import threading
 import time
@@ -31,11 +28,11 @@ class Scheduler:
         self.next_run_time = None
         self.logs = []
         # Guards against overlapping runs: trigger_now() spawns a thread per
-        # click, and a manual trigger can also land on top of the hourly job.
+        # click, which can land on top of the hourly job.
         self._run_lock = threading.Lock()
         self._calc_next_fire()
         # Surface task-level failures (dead endpoints, upstream shape changes)
-        # in the same log the panel shows.
+        # in the panel log.
         wb_tasks.set_logger(self.log)
 
     def log(self, msg):
@@ -53,8 +50,8 @@ class Scheduler:
     def start(self):
         if self._thread and self._thread.is_alive() and not self._stop_event.is_set():
             return
-        # 每个调度线程持有自己的停止事件：stop() 后立刻 start()，旧线程仍会
-        # 看到自己的事件已置位而退出，新线程用一个干净的事件继续运行。
+        # 每个调度线程持有自己的停止事件：stop() 后立刻 start()，旧线程仍会因
+        # 自己的事件已置位而退出，新线程用干净的事件继续。
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run_loop, args=(self._stop_event,),
                                         daemon=True)
@@ -158,8 +155,7 @@ class Scheduler:
                     self.log(f"账号 [{uid8}] 猫猫日常：{tr.get('msg')}")
                 time.sleep(1.0)
 
-                # 01:00 夜猫子专属任务: black_cat 只在 23:00-08:00 上报计数,
-                # 之前这个整点只是空转通用巡检, 从未真正上报过夜猫事件。
+                # 01:00 夜猫子专属任务: black_cat 只在 23:00-08:00 上报计数。
                 if time.localtime().tm_hour in self.cat_hours:
                     night = wb_tasks.run_night_growth(acc)
                     for line in night.get("logs", []):

@@ -31,9 +31,9 @@ S.save(
         "proxy_slots": [
             {"id": "slot-1", "name": "槽 1", "url": "http://a:1", "enabled": True},
             {"id": "", "name": "auto", "url": "http://b:2"},
-            {"id": "slot-2", "url": "  "},  # no url -> dropped
+            {"id": "slot-2", "url": "  "},
             {"id": "slot-3", "name": "", "url": "socks5://c:3", "enabled": False},
-            "junk",  # not a dict -> dropped
+            "junk",
         ]
     },
 )

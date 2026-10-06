@@ -1,8 +1,8 @@
 """Runtime settings for the gateway: panel password and API key override.
 
 Everything lives in `accounts/settings.json` so a change made from the web
-panel survives a restart without editing the launcher .bat files. The panel
-password is never stored in clear text - only a PBKDF2-SHA256 digest.
+panel survives a restart. The panel password is stored as a PBKDF2-SHA256
+digest only, never in clear text.
 
 Only the Python standard library is required.
 """
@@ -56,9 +56,8 @@ def load(accounts_dir):
 
     A missing file is a fresh install; anything else - unreadable JSON, a
     top-level list - raises SettingsError naming the file. Reads hold the same
-    lock as writes, so inside this process a reader cannot keep the file open
-    while os.replace() swaps it: on Windows that replace fails with "Access is
-    denied" (WinError 5).
+    lock as writes: on Windows a reader holding the file open makes the
+    writer's os.replace() fail with "Access is denied" (WinError 5).
     """
     path = settings_path(accounts_dir)
     with _lock:
@@ -119,9 +118,8 @@ def _secure_equals(left, right):
     """Constant-time compare of two credentials.
 
     hmac.compare_digest() rejects a str holding non-ASCII characters with
-    TypeError, so a key or password with an accent could not be compared at
-    all. Compare the UTF-8 bytes instead; anything that is not a string can
-    never be a match.
+    TypeError, so compare the UTF-8 bytes instead; anything that is not a
+    string can never be a match.
     """
     if not isinstance(left, str) or not isinstance(right, str):
         return False
@@ -131,9 +129,8 @@ def _secure_equals(left, right):
 def _password_rounds(data, path):
     """Validate the stored PBKDF2 cost before deriving a digest with it.
 
-    Anything a hand edit can produce - a string, a bool, a cost outside the
-    range the panel writes - is rejected with the file path instead of being
-    reported as a wrong password.
+    Anything a hand edit can produce is rejected with the file path instead of
+    being reported as a wrong password.
     """
     raw = data.get("panel_password_rounds")
     if raw is None:
@@ -214,9 +211,8 @@ def ensure_launcher_key(accounts_dir):
 
     LAN mode must never ship a well-known default: the gateway spends the
     account's own upstream quota, so anyone on the same network could drain it.
-    The value is generated once and stored so clients keep working across
-    restarts. Returns (key, created) so the caller can tell the user whether
-    this run minted a fresh credential.
+    Returns (key, created) so the caller can tell the user whether this run
+    minted a fresh credential.
     """
     with _lock:
         data = load(accounts_dir)
@@ -239,12 +235,10 @@ REALMS = ("", "intl", "cn")
 def clean_model_patterns(value):
     """Normalize one model allow-list into a list of lowercase patterns.
 
-    The panel posts a list; a hand-edited settings.json or account file tends
-    to hold a comma-separated string, so both shapes are accepted. Matching is
-    done with fnmatch, which makes an exact name (`gpt-6-astra`) and a wildcard
-    (`deepseek*`) behave the same way. An empty result means "no restriction",
-    which is what every entry written before this field existed reads back as -
-    an upgrade therefore keeps behaving exactly as before.
+    Accepts the posted list or a comma-separated string; matching is fnmatch,
+    so an exact name and a wildcard behave the same way. An empty result means
+    "no restriction", which is what entries written before this field existed
+    read back as.
     """
     if isinstance(value, str):
         raw = [part for part in re.split(r"[,;\n]", value)]
@@ -263,8 +257,8 @@ def clean_model_patterns(value):
 def patterns_allow_model(patterns, model):
     """True when `patterns` places no model restriction, or `model` matches it.
 
-    Shared by the per-Key limit and the per-account limit, so the two describe
-    a model set the same way. An empty list stays unrestricted.
+    Shared by the per-Key limit and the per-account limit; an empty list stays
+    unrestricted.
     """
     cleaned = clean_model_patterns(patterns)
     if not cleaned:
@@ -281,9 +275,8 @@ def key_allows_model(entry, model):
 
 
 # --------------------------------------------------- API key limits
-# A key may carry an expiry, a token / credit quota and an IP allow-list.
-# Anything unset reads back as 0 / [] which means "no limit", so an entry
-# written before these fields existed keeps working unchanged.
+# A key may carry an expiry, a token / credit quota and an IP allow-list;
+# anything unset reads back as 0 / [] which means "no limit".
 
 def _ip_entry_text(value):
     """Canonical text for one stored entry, or None when it is not an IP."""
@@ -302,10 +295,8 @@ def _ip_entry_text(value):
 
 
 def _ip_entry_source(value):
-    """The raw entries of an allow-list; accepts a list or a separator-joined string.
-
-    The panel posts a list; a hand-written settings.json tends to hold one
-    comma separated string, the same shapes clean_model_patterns accepts.
+    """The raw entries of an allow-list; a list or a separator-joined string,
+    the same shapes clean_model_patterns accepts.
     """
     if isinstance(value, str):
         return [part for part in re.split(r"[,;\n]", value)]
@@ -342,9 +333,7 @@ def stored_ip_allowlist(value):
 
     Reading must not raise: a hand-edited file with one bad line should still
     restrict the traffic described by the lines that do parse. A list that
-    parses to nothing at all is reported as unrestricted by `ip_allowed`, so
-    this path is the one place where a broken value is dropped instead of
-    refused.
+    parses to nothing at all is reported as unrestricted by `ip_allowed`.
     """
     entries = []
     for item in _ip_entry_source(value):
@@ -357,8 +346,7 @@ def stored_ip_allowlist(value):
 def ip_allowed(allowlist, client_ip):
     """True when `client_ip` is inside the allow-list; an empty list allows all.
 
-    An address that cannot be parsed is refused once a list is configured:
-    an allow-list that lets unreadable sources through would be no list at all.
+    An address that cannot be parsed is refused once a list is configured.
     """
     entries = stored_ip_allowlist(allowlist)
     if not entries:
@@ -436,8 +424,8 @@ def key_expired(entry, now=None):
 def key_quota_reason(entry, usage):
     """Why the key is out of quota, in words; "" when it still has room.
 
-    Reaching a quota counts as exhausted - the request that would cross the
-    line is the one that gets refused.
+    Reaching a quota counts as exhausted: the request that would cross the line
+    is the one that gets refused.
     """
     usage = usage or {}
     limit_tokens = (entry or {}).get("quota_tokens") or 0
@@ -498,12 +486,9 @@ def _clean_key_entry(entry):
 def _unique_key_id(candidate, used):
     """Return `candidate`, or a variant that is not already in `used`.
 
-    Ids used to be minted from the row's index in the submitted list, so a
-    settings file written by an older build can hold two rows carrying the same
-    id. `/settings/reveal` then answered with whichever row came first, which
-    made the copy button on the other row hand out a different key. Later
-    duplicates get a numeric suffix: the suffix is deterministic, so the id a
-    `/settings` read just returned still resolves on the follow-up reveal.
+    A settings file written by an older build can hold two rows carrying the
+    same id; later duplicates get a numeric suffix, which is deterministic so
+    the id a `/settings` read returned still resolves on the follow-up reveal.
     """
     candidate = str(candidate or "").strip()
     if candidate and candidate not in used:
@@ -526,9 +511,8 @@ def api_keys(accounts_dir):
 
     A settings file written by an older build only has the single
     `api_key`/`api_key_set` pair; that is surfaced as one unbound entry so
-    upgrades keep working without a migration step. Ids are made unique here
-    as well as on write, so a file that already holds a duplicate (and no
-    longer has to be saved before it behaves) reads back as distinct rows.
+    upgrades keep working. Ids are made unique here as well as on write, so a
+    file that already holds a duplicate reads back as distinct rows.
     """
     data = load(accounts_dir)
     stored = data.get("api_keys")
@@ -591,8 +575,8 @@ def set_api_keys(accounts_dir, keys):
 def match_api_key(accounts_dir, supplied, extra_keys=()):
     """Find which configured key a request presented, if any.
 
-    Returns a copy of the entry (with a `source` field) so the caller can read
-    the bound realm, or None when nothing matches.
+    Returns a copy of the entry with a `source` field, or None when nothing
+    matches.
     """
     supplied = (supplied or "").strip()
     if not supplied:
@@ -636,9 +620,7 @@ def set_auth_disabled(accounts_dir, disabled):
 
 def reserve_credits(accounts_dir):
     """Global low-credit guard: an account at or below this balance stays idle.
-
-    Zero disables the guard, which keeps installs that predate the setting
-    behaving exactly as before.
+    Zero disables the guard.
     """
     try:
         value = int(load(accounts_dir).get("reserve_credits") or 0)
@@ -663,10 +645,7 @@ def set_reserve_credits(accounts_dir, value):
 
 def daily_token_limit(accounts_dir):
     """Global daily guard: an account that already burned this many tokens
-    today stays idle until local midnight.
-
-    Zero disables the guard, which keeps installs that predate the setting
-    behaving exactly as before.
+    today stays idle until local midnight. Zero disables the guard.
     """
     try:
         value = int(load(accounts_dir).get("daily_token_limit") or 0)
@@ -694,12 +673,9 @@ def smart_routing(accounts_dir):
 
     On unless the operator turns it off: the scored pick hands a new
     conversation to the account that still has credits to spend before they
-    expire and is least busy right now, while the cursor pick hands it to
-    whoever follows the rotation. Only the first pick of a conversation is
-    affected - a bound conversation keeps its account, so the prompt cache
-    the affinity pinned is not touched either way. An install that never
-    touched the setting gets the scored pick; the toggle exists so the old
-    rotation can be put back.
+    expire and is least busy right now. Only the first pick of a conversation
+    is affected - a bound conversation keeps its account, so the prompt cache
+    is untouched. The toggle exists so the old rotation can be put back.
     """
     value = load(accounts_dir).get("smart_routing")
     return True if value is None else value is True
@@ -737,10 +713,8 @@ def set_session_affinity(accounts_dir, enabled):
 def auto_switch_product(accounts_dir):
     """Whether an upstream 429 may rotate an account's outbound identity.
 
-    Off unless the operator turns it on. Rotating identity spends the request's
-    retry budget and leaves the account on a channel nobody picked, so the
-    gateway does not decide that on its own - and an install that predates the
-    setting keeps behaving exactly as it did.
+    Off unless the operator turns it on: rotating identity spends the request's
+    retry budget and leaves the account on a channel nobody picked.
     """
     return load(accounts_dir).get("auto_switch_product") is True
 
@@ -758,12 +732,10 @@ def set_auto_switch_product(accounts_dir, enabled):
 def daily_chat_web(accounts_dir):
     """Whether the intl daily check-in also opens a web-channel conversation.
 
-    On unless the operator turns it off: the desktop-identity chat completion
-    this automation used to send does not register the daily activity, while a
-    web conversation does (issues #75, #59). An install that never touched the
-    setting keeps the web step, because that is the behaviour that earns the
-    credits; the toggle exists so a deployment can opt back into the old
-    single-request check-in.
+    On unless the operator turns it off: the desktop-identity completion this
+    automation sends does not register the daily activity, a web conversation
+    does (issues #75, #59). The toggle exists so a deployment can opt back into
+    the old single-request check-in.
     """
     value = load(accounts_dir).get("daily_chat_web")
     return True if value is None else value is True
@@ -780,13 +752,11 @@ def set_daily_chat_web(accounts_dir, enabled):
 def local_web_tools(accounts_dir):
     """Whether the gateway runs web_search / web_fetch calls itself.
 
-    Off unless the operator turns it on. Forwarding the client's declaration
-    untouched is what this gateway has done since v1.5.3, and it is what an
-    install that never touched the switch keeps doing: the upstream has no
-    server-side search tool, so a client declaring one runs it in its own
-    process. Turning the switch on swaps the declaration for the gateway's own
-    function and executes the calls locally (wb_webtools), which also means the
-    gateway itself fetches the URLs a model asks for - hence opt-in only.
+    Off unless the operator turns it on: with the switch off, a client
+    declaring a server-side search tool runs it in its own process. Turning it
+    on swaps the declaration for the gateway's own function and executes the
+    calls locally (wb_webtools), so the gateway itself fetches the URLs a model
+    asks for - hence opt-in only.
     """
     return load(accounts_dir).get("local_web_tools") is True
 
@@ -812,10 +782,10 @@ def _test_model_key(realm):
 def test_model(accounts_dir, realm=None):
     """The model the panel's account test sends, per exit.
 
-    The test spends the account's own quota on one real completion, so it has
-    to run a model that account may call; each exit picks its own. A settings
-    file from before the per-exit choice carries one shared value, which still
-    applies until the panel writes an exit of its own.
+    The test spends the account's own quota on one real completion, so it runs
+    a model that account may call. A settings file from before the per-exit
+    choice carries one shared value, which still applies until the panel writes
+    an exit of its own.
     """
     data = load(accounts_dir)
     key = _test_model_key(realm)
@@ -896,11 +866,9 @@ def model_served(accounts_dir, model):
 def excluded_seen(accounts_dir):
     """Model ids the default exclusion has already been applied to.
 
-    The catalogue the panel shows carries a few names the old curation rules
-    drop from the served list. Those start switched off, and this list
-    remembers which ones were switched off automatically, so checking one back
-    on in the panel stays checked instead of being switched off again on the
-    next load.
+    The catalogue carries a few names the curation rules drop from the served
+    list; those start switched off, and this list remembers which ones, so
+    checking one back on in the panel stays checked.
     """
     return _clean_model_ids(load(accounts_dir).get("excluded_seen"))
 
@@ -926,9 +894,8 @@ def messages_format(accounts_dir):
     """The pipeline /v1/messages runs a translated request through.
 
     openai-completions translates straight to Chat Completions;
-    openai-responses translates to Responses first and lets that pipeline
-    finish the job. Anything unrecognised (an old settings file, a hand-edited
-    value) reads back as the default.
+    openai-responses translates to Responses first. Anything unrecognised (an
+    old settings file, a hand-edited value) reads back as the default.
     """
     value = str(load(accounts_dir).get("messages_format") or "").strip()
     return value if value in MESSAGES_FORMATS else DEFAULT_MESSAGES_FORMAT
@@ -988,9 +955,9 @@ def _slot_seq(data):
 def proxy_slots(accounts_dir):
     """Every configured proxy slot, in stored order.
 
-    Ids are filled in a second pass: an entry stored without an id must not
-    take a number that a later entry of the same file already claims
-    explicitly, or two slots would end up sharing an id.
+    Ids are filled in a second pass: an entry stored without one must not take
+    a number a later entry of the same file already claims, or two slots would
+    share an id.
     """
     data = load(accounts_dir)
     stored = data.get("proxy_slots")
@@ -1014,9 +981,9 @@ def proxy_slots(accounts_dir):
 def set_proxy_slots(accounts_dir, slots):
     """Replace the whole slot list. Returns the stored list.
 
-    Ids are drawn from a counter that only ever grows. Accounts persist the
-    id they are bound to, so recycling a freed id would silently re-point an
-    existing account at a newly added slot's exit IP.
+    Ids are drawn from a counter that only ever grows: accounts persist the id
+    they are bound to, so recycling a freed id would re-point an existing
+    account at a newly added slot's exit IP.
     """
     with _lock:
         data = load(accounts_dir)
@@ -1086,8 +1053,8 @@ def find_proxy_slot(accounts_dir, slot_id):
 class PanelSessions(object):
     """In-memory bearer tokens handed out after a successful panel login.
 
-    Deliberately not persisted: restarting the gateway logs browsers out, which
-    is the safer default for a LAN tool that people expose behind a port map.
+    Deliberately not persisted: restarting the gateway logs browsers out, the
+    safer default for a LAN tool exposed behind a port map.
     """
 
     def __init__(self, ttl=SESSION_TTL):

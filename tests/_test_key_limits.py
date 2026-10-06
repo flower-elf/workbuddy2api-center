@@ -1,8 +1,6 @@
 """API Key 的限额：字段校验、省略即保留、过期 / IP / 配额拦截、用量与重置。
 
-拦截发生在客户端接口上：过期 401、IP 不在白名单 403、配额用尽 429，Messages
-接口用 Anthropic 的错误外壳，面板会话不受这些限制。用量按每个 Key 自己
-usage_reset_at 之后的记录累加。
+过期 401、IP 不在白名单 403、配额用尽 429；Messages 用 Anthropic 错误外壳，面板会话不受限制；用量只累加 usage_reset_at 之后的记录。
 """
 
 import json
@@ -131,7 +129,7 @@ check("积分可以是小数", S.clean_quota_credit("1.5") == (1.5, ""))
 check("积分负数拒绝", S.clean_quota_credit(-0.5)[1] != "")
 
 print()
-print("[3] 字段落盘与读回")
+print("[3] 字段写入与读回")
 
 d = tempfile.mkdtemp(prefix="wb-keylimits-d-")
 S.set_api_keys(d, [{"id": "k1", "name": "限额", "key": "key-one", "expires_at": 1790000000,
@@ -139,11 +137,11 @@ S.set_api_keys(d, [{"id": "k1", "name": "限额", "key": "key-one", "expires_at"
                     "ip_allowlist": ["10.0.0.0/24", "127.0.0.1"],
                     "usage_reset_at": 1780000000}])
 entry = S.api_keys(d)[0]
-check("过期时间落盘", entry["expires_at"] == 1790000000, entry)
-check("token 配额落盘", entry["quota_tokens"] == 1000, entry)
-check("积分配额落盘", entry["quota_credit"] == 2.5, entry)
-check("IP 白名单落盘", entry["ip_allowlist"] == ["10.0.0.0/24", "127.0.0.1"], entry)
-check("重置时间落盘", entry["usage_reset_at"] == 1780000000, entry)
+check("过期时间写入", entry["expires_at"] == 1790000000, entry)
+check("token 配额写入", entry["quota_tokens"] == 1000, entry)
+check("积分配额写入", entry["quota_credit"] == 2.5, entry)
+check("IP 白名单写入", entry["ip_allowlist"] == ["10.0.0.0/24", "127.0.0.1"], entry)
+check("重置时间写入", entry["usage_reset_at"] == 1780000000, entry)
 S.set_api_keys(d, [{"id": "k1", "name": "旧行", "key": "key-one"}])
 entry = S.api_keys(d)[0]
 check("旧行没有这些字段时读回无限制",
@@ -196,7 +194,7 @@ with tempfile.TemporaryDirectory(prefix="wb-keylimits-") as directory:
         cleared_exit = save({"api_keys": [{"id": "k1", "key": "", "realm": ""}]})
         check("显式空串清掉出口", cleared_exit.status == 200
               and S.api_keys(directory)[0]["realm"] == "", S.api_keys(directory)[0])
-        # 把出口恢复回去，后面的检查还要用它
+        # 恢复出口，后面的检查还要用
         save({"api_keys": [{"id": "k1", "key": "", "realm": "cn"}]})
 
         again = save({"api_keys": [{"id": "k1", "key": "", "expires_at": 1890000000,
@@ -260,7 +258,6 @@ with tempfile.TemporaryDirectory(prefix="wb-keylimits-") as directory:
         check("usage_reset_at 被写成当前时间", reset_at >= int(now), reset_at)
         stat = proxy.key_usage("k1", reset_at)
         check("重置后旧记录不再计入", stat["requests"] == 0 and stat["total_tokens"] == 0, stat)
-        # 重置之后写下的行才是新的起点
         write_rows([usage_row("k1", 40, 0.2, at=reset_at + 5)])
         stat = proxy.key_usage("k1", reset_at)
         check("重置之后的行重新累计", stat["requests"] == 1 and stat["total_tokens"] == 40, stat)

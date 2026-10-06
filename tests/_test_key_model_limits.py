@@ -1,14 +1,6 @@
-"""A key may be limited to part of the catalogue, and the limit is enforced.
+"""A key may be limited to the models it is allowed to ask for; a request outside the list is refused locally with a readable 400.
 
-The panel binds each API key to an exit; this adds a second, optional binding:
-the models that key is allowed to ask for. A request that names a model outside
-the list is answered with a readable 400 locally, so nothing reaches upstream
-and no credits are spent - which is the whole point, since clients fire
-background requests straight at the catalogue from outside the model picker.
-
-These cases pin the storage shape, the matching rules and the enforcement
-point, plus the upgrade path: every key written before this field existed has
-to read back as unrestricted. No network access required.
+Offline: the storage shape, the matching rules, the enforcement point and the upgrade path are pinned here; every key written before this field existed reads back unrestricted.
 """
 
 import os
@@ -130,7 +122,7 @@ d3 = tempfile.mkdtemp(prefix="wb-keymodels-")
 S.set_api_keys(d3, [{"id": "k1", "name": "limited", "key": "key-delta",
                      "realm": "cn", "models": ["deepseek/*"]}])
 with mock.patch.multiple(proxy, ACCOUNTS_DIR=d3, POOL=None, SCHEDULER=None):
-    # An older cached panel posts rows without the new field at all.
+    # An older cached panel posts rows without the new field.
     request = FakeRequest(payload={"api_keys": [
         {"id": "k1", "name": "limited", "key": "", "realm": "cn", "enabled": True},
     ]})

@@ -15,8 +15,7 @@
 #
 #  On macOS you can also double-click start-wb-proxy-lan.command.
 #
-#  This is the POSIX counterpart of start-wb-proxy-lan.bat. The
-#  .bat launchers are left in place for Windows users.
+#  POSIX counterpart of start-wb-proxy-lan.bat.
 # ===========================================================
 
 set -u

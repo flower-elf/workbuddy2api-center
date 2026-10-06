@@ -1,5 +1,4 @@
-// 模型页的纯逻辑：目录来源文案、能力判定、筛选排序、统计与勾选后的 disabled_models 计算。
-// 只依赖 core/format.js，可以在 Node 里直接测试。
+// 模型页的纯逻辑：目录来源文案、能力判定、筛选排序、统计与勾选后的 disabled_models 计算；只依赖 core/format.js，可在 Node 里直接测试。
 
 export const SOURCE_LABELS = {
   server: '本次从服务器获取',
@@ -13,10 +12,8 @@ export function sourceLabel(source) {
   return SOURCE_LABELS[source] || source;
 }
 
-/** 长上下文的判定阈值：上下文长度达到 128K 就算长上下文。 */
 export const LONG_CONTEXT_TOKENS = 128000;
 
-/** 128000 → 128K，1000000 → 1M；没有数据时显示占位符。 */
 export function fmtTokens(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return '—';
@@ -155,10 +152,7 @@ export function hasCredits(data) {
   return (data || []).some((m) => creditsValue(m) !== null);
 }
 
-/**
- * 表格要显示的行：先按「被排除且未处理」隐藏，再按搜索词与能力筛选。
- * options: { query, capability, showExcluded, sort }
- */
+/** 表格要显示的行：先按「被排除且未处理」隐藏，再按搜索词与能力筛选。 */
 export function selectModels(data, options = {}) {
   const query = (options.query || '').trim().toLowerCase();
   const capability = CAPABILITIES.find((c) => c.id === options.capability) || CAPABILITIES[0];

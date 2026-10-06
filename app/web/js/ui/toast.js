@@ -1,7 +1,7 @@
 import { html, render } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 
-// 顶部居中的提示消息。最多同时显示 4 条，错误与警告停留更久。
+// 顶部居中的提示消息，错误与警告停留更久。
 const MAX_VISIBLE = 4;
 const KINDS = {
   success: { icon: 'Check', duration: 3600 },

@@ -1,8 +1,6 @@
-"""请求日志的多维筛选：realm / key / status / model / account / ip / 时间窗 + 分页。
+"""请求日志的多维筛选：realm / key / status / model / account / ip / 时间窗与分页。
 
-筛选要给出筛选后的总数与页数，每行补上 key_name；旧行没有 key_id / ip /
-status 字段，未被筛掉时照旧读出，按 Key 筛选时自然落选。同一条件连打两次
-也必须正常返回（缓存过的计数不能再被当作新结果拼一次）。
+返回筛选后的总数与页数，每行补 key_name；旧行缺少 key_id / ip / status 时照旧读出，按 Key 筛选会漏掉它们；同一条件连打两次也正常返回。
 """
 
 import io
@@ -71,7 +69,7 @@ rows = [
         account="acct-b", status=500, error=True),
     row(TODAY0 + 400, "DeepSeek-V4.1-Flash", key_id="gone", ip="10.0.0.7",
         account="acct-a", status=200),
-    # 契约之前的旧行：没有 key_id / ip / status 字段
+    # 旧行：没有 key_id / ip / status 字段
     {"at": TODAY0 + 500, "iso": "old", "model": "legacy-model", "realm": "intl",
      "outcome": "completed", "total_tokens": 7, "account": "acct-a"},
 ]
@@ -149,7 +147,7 @@ check("按账号 uid 筛选", by_acct["total"] == 2, by_acct["total"])
 by_ip = proxy.recent_usage(100, filters=proxy.usage_filters(ip="192.168."))
 check("按 IP 子串筛选", by_ip["total"] == 1, by_ip["total"])
 check("IP 子串命中整行", by_ip["rows"][0]["key_id"] == "k2", by_ip["rows"])
-# 子串可以落在值中间或末尾：预筛只要求行里有 ip 字段，不能按整串来筛
+# 子串可以在值的中间或末尾出现：预筛只要求行里有 ip 字段。
 tail_ip = proxy.recent_usage(100, filters=proxy.usage_filters(ip="0.0.5"))
 check("IP 后缀子串也能筛到", tail_ip["total"] == 2 and len(tail_ip["rows"]) == 2,
       (tail_ip["total"], len(tail_ip["rows"])))
@@ -229,7 +227,7 @@ check("查询串被逐项接上", status == 200 and payload["total"] == 1,
       (status, payload.get("total")))
 check("limit 被读进来", payload["limit"] == 20, payload["limit"])
 status, payload = FakeRequest()._get_usage_recent({"realm": ["intl"], "limit": ["abc"]})
-check("limit 非法时回落到 100", payload["limit"] == 100, payload["limit"])
+check("limit 非法时改用 100", payload["limit"] == 100, payload["limit"])
 check("未给条件时返回全部", payload["total"] == 4, payload["total"])
 
 print()

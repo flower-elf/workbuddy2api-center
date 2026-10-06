@@ -1,13 +1,10 @@
 """Built-in model catalog for the WorkBuddy international realm.
 
-Snapshot of the model list the desktop app receives from
-www.workbuddy.ai, shipped so that a machine without the desktop app
-(and therefore without its cache) still sees the full catalog. The
-CLI-facing model endpoint returns a narrower list that omits models
-such as deepseek-v4.1-flash and gpt-6-astra.
-
-Live sources take precedence: whatever the app cache or the API reports
-is overlaid on top of this catalog by merge_catalog().
+Snapshot of the model list the desktop app receives from www.workbuddy.ai,
+shipped so a machine without its cache still sees the full catalog; the
+CLI-facing model endpoint returns a narrower list that omits models such as
+deepseek-v4.1-flash and gpt-6-astra. Live sources take precedence: whatever
+the app cache or the API reports is overlaid on top by merge_catalog().
 
 Stored as JSON text and parsed at import time so the literals stay
 valid JSON (true/false/null) instead of needing Python spellings.

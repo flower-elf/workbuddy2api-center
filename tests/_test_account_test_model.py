@@ -1,10 +1,5 @@
-"""The account-row test button runs the model chosen in the settings page.
-
-/accounts/test used to carry one hard-coded model id, which made the button
-useless for a pool that serves a different model. It now reads
-wb_settings.test_model(), while an explicit `model` in the payload still wins;
-/settings/save validates the stored value because the id travels to the
-account's own upstream verbatim.
+"""The account-row test button runs wb_settings.test_model(); an explicit payload `model` wins.
+/settings/save validates the id because it travels to the account's upstream verbatim.
 """
 import json
 import os
@@ -111,8 +106,6 @@ class ParseTestModelTests(unittest.TestCase):
 
 
 class AccountTestRouteTests(unittest.TestCase):
-    """/accounts/test sends the configured model; the payload still wins."""
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(prefix="test-model-route-")
         self.addCleanup(self._tmp.cleanup)

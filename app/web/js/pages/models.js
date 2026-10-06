@@ -10,8 +10,7 @@ import { CAPABILITIES, LONG_CONTEXT_TOKENS, capabilityBadges, capabilityLabel, c
          creditInfo, disabledIds, fmtTokens, hasCredits, hiddenExcludedCount,
          outputText, panelModelsUrl, reasoningLevels, selectModels, sourceLabel, summary, withEnabled } from './models/logic.js';
 
-// 模型页：目录来自 GET /panel/models，勾选状态写回 settings 的 disabled_models。
-// 目录本身按 5 分钟缓存，所以这一页只在手动点击时重新读取。
+// 模型页：目录来自 GET /panel/models，勾选状态写回 settings 的 disabled_models；目录按 5 分钟缓存，只在手动点击时重新读取。
 
 export function mount(host, ctx) {
   const realm = getState().viewRealm;
@@ -19,7 +18,7 @@ export function mount(host, ctx) {
     data: null,          // null 表示首屏还没读到数据
     source: '',
     fetchedAt: null,
-    error: '',           // 首屏失败的原因
+    error: '',
     inline: '',          // 刷新失败的原因，保留已有数据
     query: '',
     capability: 'all',

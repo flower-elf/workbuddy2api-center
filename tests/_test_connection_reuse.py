@@ -1,18 +1,5 @@
-"""A rejected request must not desynchronise a keep-alive connection.
-
-An early rejection (401, 429, 404) used to reply without reading the request
-body, so the payload stayed in the socket. The next request on that connection
-then parsed the leftover JSON as its request line and failed - surfacing as a
-bogus "414 Request-URI Too Long" with an empty request line in the log, on an
-otherwise healthy connection.
-
-Any client using a connection pool hits this as "random" failures that
-disappear on retry, which is why it is worth a standing test. A raw socket is
-required: an HTTP client library would silently open a fresh connection and
-hide the bug entirely.
-
-Starts a real server on a spare port with a throwaway store, so it needs no
-network access and does not touch the real accounts.
+"""A rejected request must not desynchronise a keep-alive connection: the body must be read before the error reply, else leftover JSON
+is parsed as the next request line. Raw sockets only, since a client library hides the bug; local server, no network access.
 """
 
 import json
@@ -25,7 +12,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)          # the gateway lives in <root>/app
+ROOT = os.path.dirname(HERE)
 APP = os.path.join(ROOT, "app")
 PY = os.path.join(ROOT, "python", "python.exe")
 if not os.path.exists(PY):
@@ -86,11 +73,7 @@ def wait_ready():
 
 
 def read_response(sock, timeout=20):
-    """读完整的一条 HTTP/1.1 应答：响应头与 Content-Length 指定长度的正文。
-
-    固定长度的 recv 会把上一条应答的正文残留在连接里，下一轮的断言就会把
-    残留字节当成新应答的开头。
-    """
+    """读完整的一条应答：响应头与 Content-Length 指定长度的正文，避免残留字节被下一轮当成新应答。"""
     sock.settimeout(timeout)
     buf = b""
     while b"\r\n\r\n" not in buf:

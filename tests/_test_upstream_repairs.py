@@ -1,12 +1,6 @@
-"""Deterministic tests for the three upstream-request repairs.
+"""上游请求的三处修补：prompt_cache_key 注入、deepseek thinking + effort 补全、工具调用配对修复。
 
-No network and no upstream account needed: the functions under test are pure
-body transformations, so each case feeds a synthetic request and asserts the
-shape that leaves for the upstream.
-
-  1. prompt_cache_key injection  - reuse the upstream prefix cache, account scoped
-  2. deepseek thinking + effort  - thinking.type alone does not enable the trace
-  3. tool-call pairing repair    - orphaned calls / split results kill a session
+不联网、不需要上游账号：被测函数是纯体重写，用例喂合成请求体并断言出站形状。
 """
 import copy
 import os

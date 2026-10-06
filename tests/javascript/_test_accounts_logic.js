@@ -1,5 +1,4 @@
-/* 账号页纯逻辑：可用性分档、筛选排序分页、积分与有效期口径、调度优先级校验、出口与身份选项、
- * 出口分配计划、批量结果汇总。 */
+/* 账号页纯逻辑：可用性分档、筛选排序分页、积分与有效期口径、校验、出口选项、批量汇总。 */
 import assert from 'node:assert/strict';
 
 import * as logic from '../../app/web/js/pages/accounts/logic.js';
@@ -16,7 +15,7 @@ const cool = (over = {}) => base(Object.assign({
   modelCooldowns: [{ model: 'glm-5.3', expiresAt: sec(now) + 600 }],
 }, over));
 
-// ---- 可用性分档：停用优先于一切，其次是过期、冷却、保留积分、日限额、错误、模型冷却
+// ---- 可用性分档
 assert.equal(logic.availabilityTier(base(), now), 'usable');
 assert.equal(logic.availabilityBadge(base(), now).text, '可用');
 assert.equal(logic.availabilityBadge(base(), now).tone, 'success');
@@ -51,7 +50,7 @@ assert.equal(modelCooled.tier, 'modelCooled');
 assert.equal(modelCooled.group, 'cooling', '只有模型受限的账号归入冷却中');
 assert.equal(modelCooled.text, '模型冷却');
 
-// ---- 模型冷却：按恢复时刻升序，过期条目不再显示，模型名原样带出
+// ---- 模型冷却
 assert.deepEqual(logic.activeModelCooldowns(base({ modelCooldowns: [{ model: 'x', expiresAt: sec(now) - 5 }] }), now), []);
 assert.deepEqual(logic.activeModelCooldowns(base({ modelCooldowns: [{ model: 'x', expiresAt: 'bad' }] }), now), []);
 const pills = logic.cooldownPills(base({
@@ -67,7 +66,6 @@ assert.equal(pills[0].text, 'glm-5.3 · ' + logic.fmtClock((sec(now) + 600) * 10
 const raw = logic.cooldownPills(base({ modelCooldowns: [{ model: '"><img src=x>', expiresAt: sec(now) + 60 }] }), now);
 assert.equal(raw[0].model, '"><img src=x>', '模型名原样返回，转义由模板负责');
 
-// 模型限流的原文不再重复显示；其它错误照常显示
 assert.equal(logic.errorLine(base({ lastError: 'HTTP 429 (model throttled)', modelCooldowns: [{ model: 'glm-5.3', expiresAt: sec(now) + 600 }] }), now), '');
 assert.equal(logic.errorLine(base({ lastError: 'HTTP 429 (model throttled)' }), now), 'HTTP 429 (model throttled)');
 assert.equal(logic.errorLine(base({ lastError: 'HTTP 401', modelCooldowns: [{ model: 'glm-5.3', expiresAt: sec(now) + 600 }] }), now), 'HTTP 401');
@@ -89,7 +87,7 @@ assert.deepEqual(logic.selectAccounts(list, { filter: 'usable' }, now).map((a) =
 assert.deepEqual(logic.selectAccounts(list, { filter: 'all' }, now).map((a) => a.uid), ['u1', 'u3', 'u4', 'u5', 'u2'],
   '默认顺序把停用账号沉到最后');
 
-// ---- 搜索范围：昵称、UID、文件名、备注
+// ---- 搜索范围
 const searchable = base({ nickname: 'Alice', uid: 'AbC-123', file: 'abc-123.json', note: '张叔叔' });
 assert.equal(logic.matchQuery(searchable, ''), true);
 assert.equal(logic.matchQuery(searchable, 'alice'), true, '搜索不区分大小写');
@@ -112,7 +110,7 @@ assert.deepEqual(logic.sortAccounts(sortable, 'priority').map((a) => a.uid), ['b
 assert.equal(logic.priorityOf(base({ priority: 'x' })), 100, '优先级缺失或非法时按默认值 100 参与排序');
 assert.equal(logic.priorityOf(base({ priority: 0 })), 0);
 
-// ---- 分页：页码越界时收敛
+// ---- 分页
 const many = Array.from({ length: 21 }, (_v, i) => base({ uid: 'u' + i }));
 const first = logic.paginate(many, 1);
 assert.equal(first.items.length, 20);
@@ -130,7 +128,7 @@ assert.equal(logic.emptyKind([base()], [], []), 'realm');
 assert.equal(logic.emptyKind([base()], [base()], []), 'filtered');
 assert.equal(logic.emptyKind([base()], [base()], [base()]), '');
 
-// ---- 只有国内版显示签到，只有国际版显示两种打卡
+// ---- 打卡动作按版本区分
 assert.deepEqual(logic.realmActions('cn'), { checkin: true, dailyChat: false, dailyChatWeb: false });
 assert.deepEqual(logic.realmActions('intl'), { checkin: false, dailyChat: true, dailyChatWeb: true });
 assert.equal(logic.accountsForRealm([base({ uid: 'x', realm: 'cn' }), base({ uid: 'y', realm: 'intl' }), base({ uid: 'z', realm: '' })], 'intl').length, 2,
@@ -165,7 +163,7 @@ assert.equal(logic.creditExpiryChip(base(), now), null);
 assert.equal(logic.creditExpiryChip(base({ creditExpiries: [{ at: sec(now) + 5 * 86400, amount: 10 }] }), now).tone, 'warning');
 assert.equal(logic.creditExpiryChip(base({ creditExpiries: [{ at: sec(now) + 30 * 86400, amount: 10 }] }), now).tone, 'muted');
 
-// ---- 积分进度条：可用占总额，总额未知或为 0 时不画
+// ---- 积分进度条
 assert.equal(Math.round(logic.creditBarPct(base({ credits: { remain: 3819, size: 4698 } }))), 81);
 assert.equal(logic.creditBarPct(base({ credits: { remain: 5000, size: 4000 } })), 100, '可用超过总额时按满格');
 assert.equal(logic.creditBarPct(base({ credits: { remain: 0, size: 4000 } })), 0);
@@ -174,7 +172,7 @@ assert.equal(logic.creditBarPct(base({ credits: { remain: 100 } })), null);
 assert.equal(logic.creditBarPct(base({ credits: null })), null);
 assert.equal(logic.creditBarPct(base()), null);
 
-// ---- 有效期内的积分：过期的套餐不计，用完但没过期的仍计入总额
+// ---- 有效期内的积分
 const mixed = base({ credits: {
   remain: 1500, size: 6000,
   packages: [
@@ -188,7 +186,7 @@ assert.equal(Math.round(logic.creditBarPct(mixed, now)), 20);
 assert.deepEqual(logic.validCredits(base({ credits: { remain: 700, size: 900 } }), now), { remain: 700, size: 900 }, '没有套餐明细时回退到汇总值');
 assert.equal(logic.validCredits(base({ credits: null }), now), null);
 
-// ---- 令牌有效期：进度按签发到到期的实际时长取满格
+// ---- 令牌有效期
 const token = logic.tokenExpiryView(base(), now);
 assert.equal(token.text, '30.0 天');
 assert.equal(token.pct, null, '凭证文件与令牌都没有签发时间时不画进度条');
@@ -205,7 +203,7 @@ const unknown = logic.tokenExpiryView(base({ expiresAt: 0, expiresIn: '未知' }
 assert.equal(unknown.text, '未知');
 assert.equal(unknown.tone, 'muted');
 
-// ---- 调度优先级校验：非法输入不发送请求
+// ---- 调度优先级校验
 assert.deepEqual(logic.parsePriorityInput(0), { ok: true, value: 0 });
 assert.deepEqual(logic.parsePriorityInput(' 9999 '), { ok: true, value: 9999 });
 assert.equal(logic.parsePriorityInput(10000).ok, false);
@@ -215,7 +213,7 @@ assert.equal(logic.parsePriorityInput('').ok, false);
 assert.equal(logic.parsePriorityInput('abc').ok, false);
 assert.equal(logic.parsePriorityInput('3.5').ok, false);
 
-// ---- 单账号单模型的并发上限：0 或空表示不限，其余必须是 0 到 1000 的整数
+// ---- 单账号单模型的并发上限：0 或空表示不限
 assert.deepEqual(logic.parseConcurrencyInput(''), { ok: true, value: 0 });
 assert.deepEqual(logic.parseConcurrencyInput(' 0 '), { ok: true, value: 0 });
 assert.deepEqual(logic.parseConcurrencyInput('4'), { ok: true, value: 4 });
@@ -227,7 +225,7 @@ assert.equal(logic.parseConcurrencyInput('abc').ok, false);
 assert.ok(logic.parseConcurrencyInput('1001').message.includes('0 表示不限'),
   '拒绝时要说清填 0 表示不限，否则操作员不知道怎么关掉');
 
-// 旧账号没有这个字段，必须当作不限（0），不能显示成空白或 NaN
+// 旧账号缺少该字段时按不限处理
 assert.equal(logic.concurrencyOf(base()), 0, '没设过的账号按不限处理');
 assert.equal(logic.concurrencyOf(base({ concurrencyLimit: 3 })), 3);
 assert.equal(logic.concurrencyOf(base({ concurrencyLimit: 0 })), 0);
@@ -236,7 +234,7 @@ assert.equal(logic.concurrencyOf(base({ concurrencyLimit: 'x' })), 0);
 assert.equal(logic.activeRequestsOf(base()), 0);
 assert.equal(logic.activeRequestsOf(base({ activeRequests: 2 })), 2);
 
-// ---- 心跳重绘时的草稿：只有正在编辑的那个框用草稿值
+// ---- 心跳重绘时的草稿
 const draft = { uid: 'uid-a', field: 'priority', value: '7', start: 1, end: 1 };
 assert.equal(logic.draftFor(draft, 'uid-a', 'priority'), '7');
 assert.equal(logic.draftFor(draft, 'uid-b', 'priority'), null);
@@ -245,7 +243,7 @@ assert.equal(logic.draftFor(null, 'uid-a', 'priority'), null);
 assert.equal(logic.uidAttr('a b"c<d'), 'abcd', 'data 属性只保留安全字符');
 assert.equal(logic.uidAttr('8e1f-2a'), '8e1f-2a');
 
-// ---- 出口下拉：旧代理要如实展示，未知槽位不能悄悄变成直连
+// ---- 出口下拉：旧代理与未知槽位如实展示，不静默回退直连
 const legacy = logic.slotOptions(base({ proxy: 'http://127.0.0.1:7890' }), [{ id: 's1', name: '香港', enabled: true }]);
 assert.equal(legacy.selected, '__legacy__');
 assert.equal(legacy.options[0].value, '__legacy__');
@@ -285,7 +283,7 @@ assert.equal(logic.summarizeResults([{ uid: 'u1', nickname: '甲', ok: true, con
 assert.equal(logic.anyOk([{ ok: false }, { ok: true }]), true);
 assert.equal(logic.anyOk([]), false);
 
-// ---- 积分补查：每个账号只补一次
+// ---- 积分补查
 const tried = new Set(['u2']);
 assert.deepEqual(logic.creditsToFill([
   base({ uid: 'u1' }),
@@ -299,7 +297,7 @@ assert.deepEqual(logic.mergeCredits(
 )[0].credits, { remain: 42 });
 assert.equal(logic.mergeCredits([base({ uid: 'u9', credits: null })], [{ uid: 'u1', credits: { remain: 1 } }])[0].credits, null);
 
-// ---- 出口分配计划：只补未绑定，按顺序轮流分配已启用槽位
+// ---- 出口分配计划：轮流分配已启用槽位
 const assign = logic.autoAssignPlan([
   base({ uid: 'a' }),
   base({ uid: 'b', proxySlot: 's1' }),

@@ -1,10 +1,4 @@
-"""Slot ids must never be recycled onto a different slot.
-
-Accounts persist the slot id they are bound to. If a removed id could be
-handed to a newly added slot, that account would silently start using the new
-slot's exit IP - the panel would show a fresh slot while an existing account's
-route changed underneath it. Nothing would look broken, which is what makes
-it worth a test.
+"""槽位 id 绝不能被回收给另一个槽位:账号记住自己绑定的 id,回收会让它的出口 IP 在面板看不到异常的情况下改变。
 """
 
 import os
@@ -77,8 +71,7 @@ wb_settings.set_proxy_slots(work, [
 pool = wb_accounts.AccountPool(work)
 pool.add(account("u1", "slot-2"))
 
-# Drop slot-2 and add a replacement in the same save - the case where
-# "highest surviving + 1" handed slot-2 back out.
+# 同一次保存里删掉 slot-2 又新增:被释放的 id 不能被再次发出
 new_list = wb_settings.set_proxy_slots(work, [
     {"id": "slot-1", "name": "A", "url": "http://10.0.0.1:17901", "enabled": True},
     {"id": "", "name": "C", "url": "http://10.0.0.9:17909", "enabled": True},

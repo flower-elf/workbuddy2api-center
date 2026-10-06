@@ -1,10 +1,4 @@
-"""单账号单模型的并发上限。
-
-每个账号可以在面板上设一个数，限制「同一账号 + 同一模型」同时在途的请求数：
-同一账号的不同模型各自计数；名额满的账号从选号里消失；池子全满时报 429 而不是
-503；网络工具的续写轮复用调用方已持有的名额，不额外占一个也不把它退掉。
-
-不需要上游凭证，也不出网：账号由字典构造，上游用桩替换。
+"""单账号单模型的并发上限：同一账号的不同模型各自计数，名额满时报 429，续写轮复用调用方的名额；不联网。
 
 Run with: python _test_concurrency_limits.py
 """
@@ -24,11 +18,7 @@ import wb_proxy as proxy
 
 
 def stub_pool(account, pick=None):
-    """open_upstream 需要的最小账号池替身：一个账号、没有绑定。
-
-    pick 可以覆盖选号：真实的 _pick_cursor / _pick_scored 会跳过名额已满的
-    账号，需要观察「池子被占满」的用例靠它复现同一个效果。
-    """
+    """open_upstream 需要的最小账号池替身；pick 覆盖选号，复现真实选号跳过满名额账号的效果。"""
     class Pool(object):
         accounts = [account]
         smart_routing = False
@@ -60,7 +50,6 @@ class ConcurrencyLimitTests(unittest.TestCase):
                                  "accessToken": "token"})
 
     def call(self, account, payload, pool=None, lease=None, **kwargs):
-        """Drive one open_upstream() against a stubbed upstream."""
         old_pool = proxy.POOL
         proxy.POOL = pool or stub_pool(account)
         try:
@@ -70,7 +59,6 @@ class ConcurrencyLimitTests(unittest.TestCase):
             proxy.POOL = old_pool
 
     def test_concurrency_limit_is_per_account_and_per_model(self):
-        """同一账号同一模型各自计数；不同模型互不占用名额。"""
         account = self.account()
         account.concurrency_limit = 1
         self.assertTrue(account.acquire_request("glm-5.3"))
@@ -119,7 +107,7 @@ class ConcurrencyLimitTests(unittest.TestCase):
             self.assertIsNone(limit, bad)
             self.assertTrue(problem, bad)
         self.assertEqual(accounts.normalise_concurrency_limit("12"), (12, ""))
-        # 文件里写坏的值不能把账号卡死，退回不限。
+        # 文件里写坏的值退回不限，不据此限制账号。
         account = accounts.Account({"uid": "u", "realm": "cn", "accessToken": "t",
                                     "concurrencyLimit": -5})
         self.assertEqual(account.concurrency_limit, 0)
@@ -167,7 +155,7 @@ class ConcurrencyLimitTests(unittest.TestCase):
         self.assertEqual(caught.exception.wait, 1)
 
     def test_a_web_tool_continuation_reuses_its_own_slot(self):
-        """续写轮选回原账号时沿用调用方的名额，上限为 1 的账号不会被自己卡死。"""
+        """续写轮选回原账号时沿用调用方的名额，上限为 1 的账号也能完成续写。"""
         account = self.account()
         account.concurrency_limit = 1
         response = object()
@@ -193,7 +181,6 @@ class ConcurrencyLimitTests(unittest.TestCase):
         self.assertEqual(account.active_for_model("glm-5.3"), 0)
 
     def test_a_failed_continuation_keeps_the_outer_slot(self):
-        """续写轮失败时不能把调用方还没用完的名额退掉。"""
         account = self.account()
         account.concurrency_limit = 1
         lease = proxy.SlotLease()
@@ -225,7 +212,7 @@ class ConcurrencyLimitTests(unittest.TestCase):
         self.assertEqual(account.active_for_model("glm-5.3"), 0)
 
     def test_a_throttled_continuation_moves_to_another_account(self):
-        """续写轮遇到原账号 429 时换号，名额随请求转到新账号。"""
+        """续写轮 429 换号时，名额跟着转到新账号。"""
         first = accounts.Account({"uid": "uid-a", "realm": "cn", "accessToken": "a"})
         second = accounts.Account({"uid": "uid-b", "realm": "cn", "accessToken": "b"})
         pool = accounts.AccountPool(tempfile.mkdtemp(prefix="cap-follow-"))
@@ -301,7 +288,7 @@ class ConcurrencyLimitTests(unittest.TestCase):
                       "原账号空出来也不回去，缓存已经不在它那里")
 
     def test_a_busy_debug_account_answers_429(self):
-        """测试台固定的账号名额满时报 429，不能被当成请求本身有误。"""
+        """测试台固定账号名额满时报 429，不算请求本身有误。"""
         account = self.account()
         account.concurrency_limit = 1
         self.assertTrue(account.acquire_request("glm-5.3"))

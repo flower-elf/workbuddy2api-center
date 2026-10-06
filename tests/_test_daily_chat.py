@@ -1,8 +1,6 @@
 """Unit tests for the international realm daily chat check-in.
 
-Two channels are covered: the desktop-identity chat completion (always sent)
-and the web conversation added for issue #75/#59, whose request shape is
-pinned here so it cannot drift from what the web app actually sends.
+Two channels are pinned here: the desktop-identity completion and the web conversation added for issue #75/#59, whose shape must not drift from the web app.
 """
 import json, os, sys, unittest, tempfile, time
 
@@ -21,15 +19,12 @@ class DailyChatTests(unittest.TestCase):
             "accessToken": "dummy",
             "lastDailyChat": None
         })
-        # Fresh account can chat
         self.assertTrue(acc.can_daily_chat())
         self.assertFalse(acc.can_checkin()) # cn only
 
-        # Already chatted today
         acc.last_daily_chat = time.strftime("%Y-%m-%d 10:00:00")
         self.assertFalse(acc.can_daily_chat())
 
-        # Chatted yesterday
         acc.last_daily_chat = "2020-01-01 10:00:00"
         self.assertTrue(acc.can_daily_chat())
 

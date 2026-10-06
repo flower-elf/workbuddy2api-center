@@ -1,6 +1,6 @@
 import { readStore, writeStore } from './storage.js';
 
-// 主题：light / dark / system。首屏由 js/theme-boot.js 提前设置，这里负责切换与跟随系统。
+// 主题：light / dark / system；首屏由 js/theme-boot.js 提前设置，这里负责切换与跟随系统。
 const KEY = 'wb-theme';
 const media = globalThis.matchMedia ? globalThis.matchMedia('(prefers-color-scheme: dark)') : null;
 

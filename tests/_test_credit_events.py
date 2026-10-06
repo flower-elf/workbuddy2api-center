@@ -1,12 +1,5 @@
-"""积分变动流水：只有余额增加才记一条，基线放在凭证文件里。
-
-为什么值得单独一套：流水是「签到 / 每日活跃 / 旅行到底有没有到账」的唯一
-证据，记多了等于虚报收益，记少了等于收益消失，两者都只能靠对账才发现。
-首次读取只建立基线（否则历史余额会被当成刚刚获得的额度），而基线必须跨重启
-保留，所以比对的是凭证文件里的 credits，不是进程内存。
-
-写入失败必须就地抛出：静默吞掉一次写失败，用户看到的是一笔不存在的收益。
-不联网：fetch_credits() 打桩 http_json；临时目录由 unittest 管理。
+"""积分变动流水：只有余额增加才记一条，基线写在凭证文件里，首次读取只建立基线；写入失败必须就地抛出。
+不联网，fetch_credits() 打桩 http_json，临时目录由 unittest 管理。
 """
 
 import json
@@ -28,7 +21,7 @@ import wb_proxy as P
 
 
 def billing(remain, size=1000):
-    """一次成功的余额读取：单套餐，remain 由参数决定。"""
+    """一次成功的余额读取：单套餐。"""
     return {"data": {"Response": {"Data": {"Accounts": [{
         "PackageName": "套餐",
         "CapacitySize": size,
@@ -51,8 +44,6 @@ class FakeRequest(object):
 
 
 class CreditEventTests(unittest.TestCase):
-    """fetch_credits 的记账行为。"""
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(prefix="wb-credit-events-write-")
         self.addCleanup(self._tmp.cleanup)
@@ -137,7 +128,7 @@ class CreditEventTests(unittest.TestCase):
         self.assertEqual([row["uid"] for row in self.events()], ["recent", "uid-cn"])
 
     def test_the_baseline_survives_a_reload(self):
-        """重启后接着比：基线来自凭证文件，不是进程内存。"""
+        """重启后接着比：基线来自凭证文件。"""
         self.fetch(40)
         self.fetch(55)
         self.assertEqual(len(self.events()), 1)
@@ -158,7 +149,7 @@ class CreditEventTests(unittest.TestCase):
             lambda: os.path.join(blocked, "credit_events.jsonl"))
         with self.assertRaises(OSError):
             self.fetch(55)
-        # 余额本身已经落盘，流水这一行丢了是看得见的中断。
+        # 余额先写进凭证文件，流水这一行缺失是看得见的中断。
         self.assertEqual(self.reload().credits["remain"], 55)
         self.assertFalse(os.path.exists(self.ledger))
 

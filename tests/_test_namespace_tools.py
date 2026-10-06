@@ -1,9 +1,6 @@
 """Deterministic tests for Codex App namespace tool support.
 
-No network: the namespace expansion, the name resolution and the outbound
-stamping are pure transformations, so every case feeds a synthetic payload and
-asserts the shape that leaves for the upstream and the shape that returns to
-the client.
+No network: expansion, name resolution and outbound stamping are pure transformations, so cases assert both the upstream and the client shapes.
 """
 import os
 import sys
@@ -104,10 +101,7 @@ check("namespaced tool reaches the chat body",
       "js" in by_name and by_name["js"]["type"] == "function")
 check("namespace map rides along for the return trip",
       chat.get("_namespace_map", {}).get("js") == "node_repl", chat.get("_namespace_map"))
-# The gateway used to turn this declaration into a function of its own and run
-# it locally, then stopped standing in for it because the upstream has no
- # server-side search tool at all; standing in for it again is opt-in through
- # the panel switch (wb_settings.local_web_tools), so this case follows it.
+# The upstream has no server-side search tool, so standing in for web_search is opt-in through wb_settings.local_web_tools; this case follows it.
 _orig_local_web = P.wb_settings.local_web_tools
 P.wb_settings.local_web_tools = lambda accounts_dir: False
 try:

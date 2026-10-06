@@ -4,7 +4,7 @@ import { navigate } from '../core/router.js';
 import { openDialog } from './dialog.js';
 import { paletteEntries, searchPalette } from './palette-logic.js';
 
-// 命令面板：Ctrl+K / ⌘K 打开，输入页面名称回车跳转。只做跳转，不执行任何操作。
+// 命令面板：Ctrl+K / ⌘K 打开；只做跳转，不执行任何操作。
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 export const PALETTE_SHORTCUT = isMac ? '⌘K' : 'Ctrl K';
 

@@ -1,5 +1,4 @@
-// 设置页的纯逻辑：选项生成、本地校验、请求体组装与运行信息整理。
-// 只依赖 core/format.js、其它页面逻辑模块与自身，可在 Node 里直接测试。
+// 设置页的纯逻辑：选项生成、本地校验、请求体组装与运行信息整理；只依赖 core/format.js、其它页面逻辑模块与自身，可在 Node 里直接测试。
 import { authSummary } from '../keys/logic.js';
 
 export const MESSAGES_FORMATS = [
@@ -128,10 +127,7 @@ export function removeSlot(slots, index) {
   return out;
 }
 
-/**
- * 编辑器里有没有还没保存的改动：跟着服务端最后给的列表逐项比。
- * 轮询靠它决定要不要覆盖编辑器内容，否则正在填的行会被刷掉（问题 #79）。
- */
+/** 编辑器里有没有还没保存的改动：轮询靠它决定要不要覆盖编辑器内容，否则正在填的行会被刷掉（问题 #79）。 */
 export function slotsDirty(slots, baseline) {
   const shape = (list) => (list || []).map((slot) => ({
     id: String((slot && slot.id) || ''),
@@ -162,7 +158,6 @@ export function discoverText(candidates) {
   return `探测到 ${list.length} 个地址，其中 ${reachable} 个可达`;
 }
 
-/** 启用中且还没有绑定出口的账号。 */
 export function unboundEnabledAccounts(accounts) {
   return (accounts || []).filter((a) => a && a.enabled !== false && !a.proxySlot);
 }
@@ -187,9 +182,7 @@ export function bindingText(count) {
 // 运行信息
 // ---------------------------------------------------------------------------
 
-/**
- * 运行信息页的行。usageLog 由用量目录推导，服务端没有单独的字段。
- */
+/** 运行信息页的行；usageLog 由用量目录推导，服务端没有单独的字段。 */
 export function aboutRows(view, origin) {
   const data = view || {};
   const usageDir = String(data.usage_dir || '');

@@ -1,5 +1,4 @@
-// 任务页：调度器状态、国内版成长任务与日常福利、国际版每日活跃打卡、积分变动记录。
-// 心跳 30 秒；任何操作都不会改动右上角「查看的版本」，页面始终只读 getState().viewRealm。
+// 任务页：调度器状态、国内版成长任务与日常福利、国际版每日活跃打卡、积分变动记录；心跳 30 秒，任何操作都不会改动右上角「查看的版本」，页面始终只读 getState().viewRealm。
 
 import { html, nothing, render } from '../core/dom.js';
 import { icon } from '../core/icons.js';

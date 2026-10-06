@@ -1,7 +1,6 @@
 """Account and panel state after a model-scoped upstream 429.
 
-Run with: python _test_model_cooldowns.py
-No upstream credentials or outbound network are used.
+Run with: python _test_model_cooldowns.py - no credentials or outbound network are used.
 """
 import atexit
 import calendar
@@ -30,7 +29,7 @@ import wb_settings as settings
 
 
 def stub_pool(account):
-    """open_upstream 需要的最小账号池替身：一个账号、没有绑定。"""
+    """open_upstream 的最小账号池替身：一个账号、没有绑定。"""
     class Pool(object):
         accounts = [account]
         smart_routing = False
@@ -125,12 +124,7 @@ class ModelCooldownTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def drive_one_429(self, account):
-        """Drive open_upstream into an upstream 429 with a stubbed urlopen.
-
-        The body is the shape the CN upstream really sends (code 6004, reset
-        time in the Chinese message), ten minutes from now in UTC+8. Returns
-        that reset instant.
-        """
+        """用替身 urlopen 把 open_upstream 推到上游 429；按 CN 上游真实形状构造 code 6004 报体，返回其中的重置时刻。"""
         reset = int(time.time()) + 600
         stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(reset + 8 * 3600))
         detail = json.dumps({"code": 6004, "requestId": "r-1", "msg":
@@ -222,8 +216,7 @@ class ModelCooldownTests(unittest.TestCase):
         old_dir = proxy.ACCOUNTS_DIR
         old_budget = proxy.MAX_PRODUCT_SWITCHES
         proxy.ACCOUNTS_DIR = directory
-        # One switch makes the assertion exact and independent of how large the
-        # real budget is (an even number of rotations ends back at workbuddy).
+        # One switch keeps the assertion exact regardless of the real budget; an even number of rotations ends back at workbuddy.
         proxy.MAX_PRODUCT_SWITCHES = 1
         proxy._SWITCH_LOG.clear()
         try:

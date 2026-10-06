@@ -4,9 +4,9 @@ import { sectionOf } from '../core/routes.js';
 import { hrefFor } from '../core/router.js';
 import { copyWithToast } from './copy.js';
 
-// 各页面共用的模板片段。全部返回 lit-html 模板，不直接操作 DOM。
+// 各页面共用的模板片段，全部返回 lit-html 模板。
 
-/** 页头：标题、说明、右侧按钮；所在页面属于某个二级导航组时，标题下方显示该组的切换。 */
+/** 页头；所在页面属于某个二级导航组时，标题下方显示该组的切换。 */
 export function pageHeader({ path, title, desc, actions = nothing }) {
   const section = path ? sectionOf(path) : [];
   return html`
@@ -47,7 +47,7 @@ export function segmented(items, activeId, onSelect, extraClass = '') {
     </div>`;
 }
 
-/** 筛选芯片：选中为实心按钮，未选为描边按钮。 */
+/** 筛选芯片；选中为实心按钮，未选为描边按钮。 */
 export function chip(label, active, onClick, count) {
   return html`
     <button type="button" class="btn btn-xs ${active ? 'btn-primary' : 'btn-outline'}" @click=${onClick}>
@@ -134,7 +134,7 @@ export function switchControl({ checked, disabled = false, onChange, label = '' 
     </label>`;
 }
 
-/** 分页条：「共 N 条 · 第 p / P 页」+ 上一页 / 下一页。 */
+/** 分页条：共 N 条 · 第 p / P 页，unit 为计数单位。 */
 export function pager({ page, pages, total, unit = '条', onPage }) {
   return html`
     <div class="pager">
@@ -161,7 +161,7 @@ export function progressBar(pct, color) {
   return html`<div class="bar"><span style="width:${width}%;${color ? 'background:' + color : ''}"></span></div>`;
 }
 
-/** 按钮执行异步操作期间显示转圈并禁用。用法：@click=${busyClick(async () => {...})} */
+/** 异步操作期间按钮显示转圈并禁用，用法：@click=${busyClick(fn)}。 */
 export function busyClick(fn) {
   return async (event) => {
     const button = event.currentTarget;

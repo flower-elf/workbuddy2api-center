@@ -1,12 +1,4 @@
-"""国内版成长任务: 夜猫子窗口按固定 UTC+8、查询失败要留痕、credits 为空不能炸。
-
-三个真实故障:
-1. in_night_window() 读 time.localtime(): 机器时区不是 UTC+8 时, 夜猫子窗口
-   与上游按 CST 判定的窗口错位, 任务在错误的时间被跳过/上报。
-2. fetch_growth_tasks() 把查询异常吞成空列表: 上游改版或网络故障和"今天没有
-   任务"在日志里长得一模一样。
-3. run_growth_tasks() 结尾读 account.credits.get(...): 首次运行或取积分失败时
-   credits 仍是 None, 整轮批量任务以 AttributeError 收场。
+"""国内版成长任务: 夜猫子窗口按固定 UTC+8 判定、查询失败要留日志、credits 为 None 不能抛异常。
 
 无网络访问: 出站请求全部走替身 urlopen。
 """
@@ -36,11 +28,7 @@ def check(label, cond, extra=""):
 
 
 class ShiftedClock(object):
-    """time 模块替身: 只有本机时区不同, 用来区分本机时区与固定 UTC+8。
-
-    now 是 UTC 时间戳; localtime() 报告 now + local_offset 的"本机时间",
-    按固定 UTC+8 算的代码走 gmtime()。
-    """
+    """time 模块替身: now 是 UTC 时间戳, localtime() 报 now + local_offset, gmtime() 不变。"""
 
     def __init__(self, real, now, local_offset):
         self._real = real
@@ -96,13 +84,13 @@ TASK_LIST = [
 
 
 def dead_urlopen(req, timeout=30, proxy=""):
-    """替身 urlopen: 所有端点都 404 (404 不重试, 不联网)。"""
+    """替身 urlopen: 所有端点都 404, 该状态不重试。"""
     url = getattr(req, "full_url", str(req))
     raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
 
 
 def offline_urlopen(req, timeout=30, proxy=""):
-    """替身 urlopen: 只回答成长任务清单, 其它端点一律 404 (404 不重试, 不联网)。"""
+    """替身 urlopen: 只回答成长任务清单, 其它端点一律 404。"""
     url = getattr(req, "full_url", str(req))
     if url.endswith("/v2/activity/growth/tasks"):
         return FakeResponse(json.dumps({"data": {"tasks": TASK_LIST}}).encode("utf-8"))
@@ -117,11 +105,10 @@ def make_account(uid="u-cn"):
     })
 
 
-# ---- [1] 夜猫子窗口按固定 UTC+8 ----------------------------------------------
 print("[1] in_night_window() 按固定 UTC+8")
 
 real_time = T.time
-# 替身本机时区 UTC-12: 本机小时与 CST 小时相差 12, 两者不可能同时落在窗口内/外
+# 替身本机时区 UTC-12: 本机小时与 CST 小时相差 12, 两者不可能同时处于窗口内或窗口外
 clock = ShiftedClock(real_time, utc_from_cst(2026, 5, 1, 23, 30), -12 * 3600)
 T.time = clock
 try:
@@ -141,7 +128,6 @@ try:
 finally:
     T.time = real_time
 
-# ---- [2] 查询失败要写日志 ----------------------------------------------------
 print()
 print("[2] fetch_growth_tasks() 的查询异常要留痕")
 
@@ -160,7 +146,6 @@ check("查询失败读成空列表", tasks == [], tasks)
 check("日志里点出失败的端点",
       any("growth/tasks" in line and "404" in line for line in logs), logs)
 
-# ---- [3] credits 为空时不能炸 ------------------------------------------------
 print()
 print("[3] run_growth_tasks() 在 credits 为 None 时不能抛 AttributeError")
 

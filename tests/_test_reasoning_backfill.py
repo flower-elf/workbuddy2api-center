@@ -1,15 +1,6 @@
-"""Deterministic tests for DeepSeek reasoning_content backfill.
+"""DeepSeek reasoning_content 回填测试;不联网,纯请求体变换。
 
-Root cause of upstream 11155 ("the reasoning content from the previous turn
-must be passed back in thinking mode"): the gateway only backfilled when the
-history already contained a reasoning trace (hasTrace half). When a third-party
-client drops reasoning entirely, every assistant message was forwarded without
-`reasoning_content` and upstream rejected the request.
-
-Upstream also validates len(reasoning) > 0, so a bare empty string is not
-enough - the field must be mirrored onto `reasoning` with a non-empty value.
-
-No network: pure payload transformation tests.
+上游 11155 要求 thinking 模式下把上一轮的 reasoning 回传,且会校验 len(reasoning) > 0,所以客户端没给时也要把字段镜像到 reasoning 并保持非空。
 """
 
 import copy

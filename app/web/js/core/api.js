@@ -1,6 +1,6 @@
 import { readStore, writeStore } from './storage.js';
 
-// 面板会话令牌放在 sessionStorage：关闭标签页即失效。API Key 可经 ?key= 传入后记在 localStorage。
+// 面板会话令牌放 sessionStorage，关闭标签页即失效；API Key 可经 ?key= 传入后记在 localStorage。
 const PANEL_STORE = 'wb-proxy-center-panel-token';
 const KEY_STORE = 'wb-proxy-center-api-key';
 
@@ -31,7 +31,7 @@ export function setApiKey(key) {
   writeStore(KEY_STORE, apiKey || null);
 }
 
-/** 会话失效时的统一处理：由 main.js 注册，负责停止轮询并显示登录页。 */
+/** 会话失效时的统一处理，由 main.js 注册。 */
 export function onUnauthorized(handler) {
   unauthorizedHandler = handler;
 }
@@ -110,7 +110,7 @@ export async function downloadFile(url, fallbackName) {
   return name;
 }
 
-/** 登录接口不带会话令牌，单独处理。成功返回服务端 JSON，失败抛出 ApiError。 */
+/** 登录接口不带会话令牌，单独处理。 */
 export async function panelLogin(password) {
   const response = await fetch('/panel/login', {
     method: 'POST',

@@ -1,5 +1,4 @@
-/* 仪表盘纯逻辑：版本筛选、可用性分档与优先级、积分汇总与提示优先级、健康快照挑选、出口密钥计数、趋势拆分。
- * 只测可感知的行为：分档谁压过谁、合计覆盖了哪些账号、快照先展示哪一个、几把密钥真正生效。 */
+/* 仪表盘纯逻辑：版本筛选、可用性分档、积分汇总与提示优先级、健康快照、出口密钥计数、趋势序列。 */
 import assert from 'node:assert/strict';
 import {
   realmOf, realmAccounts, remainSeconds, isExpired, isReady, availability,
@@ -20,14 +19,14 @@ function account(patch) {
   }, patch);
 }
 
-// ---- 版本筛选：没有 realm 的存量账号按国际版处理，国内版视图不包含它
+// ---- 版本筛选：没有 realm 的存量账号按国际版处理
 assert.equal(realmOf({}), 'intl');
 assert.equal(realmOf({ realm: 'cn' }), 'cn');
 const mixed = [account({ uid: 'a' }), account({ uid: 'b', realm: '' }), account({ uid: 'c', realm: 'cn' })];
 assert.deepEqual(realmAccounts(mixed, 'intl').map((a) => a.uid), ['a', 'b']);
 assert.deepEqual(realmAccounts(mixed, 'cn').map((a) => a.uid), ['c']);
 
-// ---- 剩余时间与过期：没有到期时间不算过期，也不能算出剩余时间
+// ---- 剩余时间与过期：没有到期时间不算过期，也算不出剩余时间
 assert.equal(remainSeconds(account({ expiresAt: 0 }), now), null);
 assert.equal(isExpired(account({ expiresAt: 0 }), now), false);
 assert.equal(remainSeconds(account({ expiresAt: sec(now) + 90 }), now), 90);
@@ -42,14 +41,13 @@ assert.notEqual(expired.label, disabledOnly.label);
 const cooling = availability(account({ inCooldown: true }), now);
 assert.notEqual(cooling.label, expired.label);
 assert.notEqual(availability(account({}), now).label, cooling.label, '冷却中与可用的档位不同');
-// 低于保留积分的账号不能接流
 assert.equal(isReady(account({ reserveBlocked: true }), now), false);
 assert.equal(isReady(account({ dailyLimitBlocked: true }), now), false);
 assert.equal(isReady(account({ inCooldown: true }), now), false);
 assert.equal(isReady(account({ enabled: false }), now), false);
 assert.equal(isReady(account({}), now), true);
 
-// ---- 账号总数与需处理数：需处理 = 总数减可用，停用的账号也在内
+// ---- 账号总数与需处理数：需处理 = 总数减可用，停用的也算
 const summarySource = [
   account({ uid: 'ok' }),
   account({ uid: 'cool', inCooldown: true }),
@@ -69,7 +67,7 @@ assert.equal(counts.length, 3);
 assert.equal(counts[0].label, availability(account({}), now).label, '可用排在最前');
 assert.equal(counts.reduce((sum, c) => sum + c.count, 0), 3);
 
-// ---- 积分汇总：未知余额不计入覆盖账号数，低于保留积分单独计数
+// ---- 积分汇总：未知余额不计入覆盖数，低于保留积分单独计数
 const credits = creditsSummary([
   account({ uid: 'a', credits: { remain: 500 }, reserveCredits: 200 }),
   account({ uid: 'b', credits: { remain: 100 }, reserveCredits: 200 }),
@@ -80,14 +78,14 @@ assert.equal(credits.known, 2);
 assert.equal(credits.total, 600);
 assert.equal(credits.low, 1);
 
-// ---- 到期明细：优先读后端算好的 creditExpiries，读不到时退回首笔套餐；按时刻升序并丢掉已过去的
+// ---- 到期明细：优先读 creditExpiries，读不到时退回首笔套餐，按时刻升序并丢掉已过去的
 const withDirect = account({ creditExpiries: [{ at: sec(now) + 9 * DAY, amount: 300, name: '月度' }, { at: sec(now) + 2 * DAY, amount: 50, name: '试用' }] });
 assert.deepEqual(accountExpiries(withDirect).map((e) => e.amount), [50, 300]);
 const withPackages = account({ creditExpiries: [], credits: { remain: 10, packages: [{ remain: 20, expireAt: sec(now) + 3 * DAY }, { remain: 0, expireAt: sec(now) + 1 * DAY }] } });
 assert.deepEqual(accountExpiries(withPackages).map((e) => e.amount), [20]);
 assert.equal(nextCreditExpiry([withDirect, withPackages], now).amount, 50, '取全体账号里最早的一笔');
 
-// ---- 积分提示的优先级：低于保留积分压过到期信息，没有低余额时才报到期的绝对值
+// ---- 积分提示：低余额压过到期信息，没有低余额时才报到期的绝对值
 const lowList = [account({ uid: 'a', credits: { remain: 10 }, reserveCredits: 200 }), withDirect];
 const lowHint = creditsHint(lowList, now);
 assert.equal(lowHint, creditsHint([lowList[0]], now), '有低余额账号时提示由低余额决定');
@@ -96,7 +94,7 @@ assert.ok(expiryHint.includes(fmtCredit(nextCreditExpiry([withDirect], now).amou
 assert.notEqual(expiryHint, creditsHint([account({ uid: 'x' })], now), '没有到期信息时提示改成覆盖账号数');
 assert.equal(creditsHint([account({ uid: 'x', credits: {} })], now), '', '一份余额都没有时不编造提示');
 
-// ---- 健康快照：需要处理的排前面，其余按剩余时间从少到多，最多取 limit 个
+// ---- 健康快照：需要处理的排前面，其余按剩余时间从少到多，最多 limit 个
 const snap = snapshotAccounts([
   account({ uid: 'healthy', expiresAt: sec(now + 30 * DAY) }),
   account({ uid: 'expiring', expiresAt: sec(now + 1 * DAY) }),
@@ -107,15 +105,14 @@ assert.equal(snap[0].uid, 'dead', '过期的账号最先展示');
 assert.equal(snap[1].uid, 'cooling');
 assert.deepEqual(snap.slice(2).map((a) => a.uid), ['expiring', 'healthy']);
 assert.equal(snapshotAccounts([...Array(12)].map((_, i) => account({ uid: 'u' + i, expiresAt: sec(now + (i + 1) * DAY) })), 9, now).length, 9);
-// 停用是用户自己的决定，不需要被优先处理，排在可用账号之后
+// 停用是用户自己的决定，排在可用账号之后
 const offLast = snapshotAccounts([account({ uid: 'off', enabled: false }), account({ uid: 'live' })], 9, now);
 assert.deepEqual(offLast.map((a) => a.uid), ['live', 'off']);
-// 同一份数据两次挑选顺序一致
 const twiceA = snapshotAccounts(mixed, 9, now).map((a) => a.uid);
 const twiceB = snapshotAccounts(mixed.slice().reverse(), 9, now).map((a) => a.uid);
 assert.deepEqual(twiceB, twiceA, '顺序不随输入顺序变化');
 
-// ---- 健康快照的进度条：按可用积分占总额的比例取满格，颜色按比例分档
+// ---- 健康快照进度条：按可用积分占总额的比例取满格，颜色按比例分档
 const longBar = creditBar(account({ credits: { remain: 3819, size: 4698 } }));
 assert.equal(Math.round(longBar.pct), 81);
 assert.equal(longBar.color, 'var(--success)', '过半绿色');
@@ -135,7 +132,7 @@ assert.equal(creditTone(mixedCredits, now).total, '5,000', '总额只合计有�
 assert.equal(creditTone(account({ credits: { remain: 100 } })).total, null, '没有总额时只显示余额');
 assert.equal(creditsSummary([mixedCredits], now).total, 1000);
 
-// ---- 到期文字：剩余秒数与颜色分档，没有到期时间时整块不显示
+// ---- 到期文字：剩余秒数与颜色分档，没有到期时间时不显示
 assert.equal(expiryVisual(account({ expiresAt: sec(now) + 30 * DAY }), now).remain, 30 * DAY);
 assert.equal(expiryVisual(account({ expiresAt: sec(now) + 30 * DAY }), now).tone, 'success');
 assert.equal(expiryVisual(account({ expiresAt: sec(now) + 1800 }), now).tone, 'warning');
@@ -143,13 +140,13 @@ assert.equal(expiryVisual(account({ expiresAt: sec(now) + 2 * 3600 }), now).tone
 assert.equal(expiryVisual(account({ expiresAt: sec(now - 1) }), now).tone, 'danger');
 assert.equal(expiryVisual(account({ expiresAt: 0 }), now), null, '没有到期时间时显示「到期时间未知」');
 
-// ---- 积分颜色：未知、非正、低于保留积分分别有不同的分档
+// ---- 积分颜色：未知、非正、低于保留积分各有分档
 assert.equal(creditTone(account({ credits: null })).tone, 'muted');
 assert.equal(creditTone(account({ credits: { remain: 0 } })).tone, 'danger');
 assert.equal(creditTone(account({ credits: { remain: 100 }, reserveCredits: 200 })).tone, 'warning');
 assert.equal(creditTone(account({ credits: { remain: 5000 }, reserveCredits: 200 })).tone, '');
 
-// ---- 出口密钥数：绑定该出口的启用密钥 + 未绑定版本的启用密钥，停用的不算
+// ---- 出口密钥数：绑定该出口的启用密钥加未绑定版本的启用密钥，停用的不算
 const keys = [
   { realm: 'intl', enabled: true },
   { realm: 'cn', enabled: true },

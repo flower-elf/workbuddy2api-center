@@ -2,9 +2,6 @@
 # ===========================================================
 #  Double-clickable macOS wrapper for start-wb-proxy-lan.sh
 #
-#  Starts the proxy in LAN mode (reachable from phones and
-#  other computers on the same network).
-#
 #  Right-click > Open the first time if Gatekeeper asks.
 #  If double-clicking does nothing:
 #      chmod +x start-wb-proxy-lan.command start-wb-proxy-lan.sh

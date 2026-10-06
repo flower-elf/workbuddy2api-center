@@ -3,14 +3,9 @@
     python tests/run_all.py            # everything
     python tests/run_all.py realm      # only suites whose name contains "realm"
 
-Python suites live in this folder and run under the current interpreter; the
-JS suites live in javascript/, need `node` on PATH, and are reported as
-skipped when it is missing. `manual/_mobile_check.py` is not part of this
-set: it drives the dashboard with Playwright/Firefox and is run by hand.
-
-Each suite's output goes to a temporary file rather than a pipe, so a suite that
-spawns the gateway still sees a normal console and a failure can be shown with
-its tail.
+Python suites run under the current interpreter, the JS suites need `node` on
+PATH; `manual/_mobile_check.py` is run by hand. Each suite writes its output to
+a temporary file so a failure can still be shown with its tail.
 """
 import os
 import shutil
@@ -50,9 +45,8 @@ def tail(path):
 
 
 def main(argv):
-    # 标准输出的编码跟随语言环境:en-US 的 Windows 是 cp1252,套件名与套件日志里的
-    # 中文会让本文件的打印和子进程的打印都抛 UnicodeEncodeError。套件日志本来就按
-    # UTF-8 读回,这里统一按 UTF-8 输出。
+    # 标准输出统一按 UTF-8：en-US 的 Windows 默认 cp1252，中文套件名与套件日志
+    # 会让本文件与子进程的打印抛 UnicodeEncodeError。
     sys.stdout.reconfigure(encoding="utf-8")
     if len(argv) > 1 and argv[1] in ("-h", "--help"):
         print(__doc__)
@@ -66,9 +60,7 @@ def main(argv):
 
     selected = suites(pattern)
     if not selected:
-        # A typo in the filter, or every suite deleted/renamed, would otherwise
-        # report "0 passed, 0 failed" and exit 0 - the one result CI must never
-        # treat as a pass.
+        # 筛选词打错或套件被删光时按错误退出，避免「0 passed, 0 failed」的退出码 0 被 CI 当成通过。
         print("  no suite matches %r in %s" % (pattern, HERE))
         return 2
 

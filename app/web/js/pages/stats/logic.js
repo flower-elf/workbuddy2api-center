@@ -1,5 +1,4 @@
-// 用量页的纯计算：时间范围的查询串、账号与密钥的用量行、模型性能矩阵的行与合计、筛选条件的生成与失效清理。
-// 只依赖 core/format.js，方便在 Node 里直接测试。
+// 用量页的纯计算：时间范围的查询串、账号与密钥的用量行、模型性能矩阵的行与合计、筛选条件的生成与失效清理；只依赖 core/format.js，方便在 Node 里直接测试。
 
 import { compareText } from '../../core/format.js';
 
@@ -16,7 +15,6 @@ export function rangeLabel(range) {
   return hit ? hit.label : RANGES[0].label;
 }
 
-/** 趋势图可以画的内容：请求数、Token，或者两条一起。 */
 export const TREND_MODES = [
   { id: 'both', label: '两者' },
   { id: 'requests', label: '请求数' },
@@ -24,11 +22,10 @@ export const TREND_MODES = [
 ];
 
 /**
- * 趋势图的标签与序列：请求数（绿）在左轴、Token（蓝）在右轴，都不带填充；
- * 只画一条时占左轴，免得图上留下一整条没有数据的坐标轴。
- * options.errors 打开后请求数之后追加一条失败数（红色虚线）。
+ * 趋势图的标签与序列：请求数（绿）在左轴、Token（蓝）在右轴，都不带填充；只画一条时占左轴，
+ * 免得图上留下一整条没有数据的坐标轴。options.errors 打开后请求数之后追加一条失败数（红色虚线）。
  *
- * order 决定叠放次序：Chart.js 会按 order 升序排好再从后往前画，所以 order 大的先画、被压在下面。
+ * order 决定叠放次序：Chart.js 按 order 升序排好再从后往前画，所以 order 大的先画、被压在下面。
  * 两条折线走势接近时，如果都留默认的 0，请求数会因为排在后面而盖住 Token。
  */
 export function trendSeries(mode, buckets, fmtNumber, fmtCompact, options = {}) {
@@ -86,7 +83,6 @@ export function trendQuery({ realm, range = '', since = null, until = null, days
   return '?' + parts.join('&');
 }
 
-/** 趋势图的粒度说明。 */
 export function trendGranularity(range) {
   return range === 'today' ? '按小时，当日汇总' : '按天聚合';
 }

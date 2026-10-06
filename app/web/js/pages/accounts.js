@@ -1,5 +1,4 @@
-// 账号页：账号池列表、积分、访问令牌有效期、出口线路、出站身份与调度优先级。
-// 心跳 30 秒；筛选、排序、分页与可用性分档都在 accounts/logic.js 里，这里只负责渲染与调用接口。
+// 账号页：账号池列表与积分、令牌有效期、出口、身份、优先级等列；筛选、排序、分页与可用性分档都在 accounts/logic.js 里，这里只负责渲染与调用接口。
 
 import { html, live, nothing, render, repeat } from '../core/dom.js';
 import { icon } from '../core/icons.js';
@@ -35,7 +34,7 @@ export function mount(host) {
     menuOpen: false,
   };
 
-  // 心跳会整块重绘，正在编辑的输入框先把内容与光标记下来，渲染后写回。
+  // 心跳会整块重绘，正在编辑的输入框先把内容与光标位置记下来，渲染后写回。
   function captureDraft() {
     const el = document.activeElement;
     if (!el || !el.dataset || !el.dataset.draft) {
@@ -104,8 +103,7 @@ export function mount(host) {
     fillMissingCredits();
   }
 
-  // 刚导入的账号还没有积分数据，补查一次；每个账号在一次页面生命周期里只查一次，
-  // 避免每轮心跳都去请求一遍整个账号池。
+  // 刚导入的账号补查一次积分；每个账号在一次页面生命周期里只查一次，避免每轮心跳重复请求。
   async function fillMissingCredits() {
     const todo = logic.creditsToFill(S.accounts, S.tried);
     if (!todo.length) return;

@@ -131,7 +131,7 @@ export function mount(host) {
     loadRows();
   }
 
-  /** 输入框按暂停 300 毫秒再取数，避免每敲一个字符都发一次请求。 */
+  /** 输入框停止输入 300 毫秒后取数。 */
   function onTextInput(name, value) {
     clearTimeout(inputTimer);
     inputTimer = setTimeout(() => setFilter(name, value), 300);
@@ -221,7 +221,7 @@ export function mount(host) {
     return html`<span class=${credit.missing ? 'muted' : 'nums'} title=${credit.title}>${credit.text}</span>`;
   }
 
-  /** 思考档位徽章；老流水与没有档位的模型都没有该字段，渲染结果与没有这一行时一致。 */
+  /** 思考档位徽章；老流水与没有档位的模型都没有该字段。 */
   function effortChip(row) {
     const effort = effortLabel(row);
     return effort ? badge(effort, 'violet', { small: true, title: '本次请求实际使用的思考档位' }) : nothing;

@@ -1,6 +1,4 @@
-"""请求体解析与几个管理接口的输入校验，对真实 Handler 发原始字节。
-
-无网络访问：只连本机临时端口。
+"""请求体解析与几个管理接口的输入校验,对真实 Handler 发原始字节;无网络访问,只连本机临时端口。
 """
 import json
 import os
@@ -15,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 _TMP = tempfile.mkdtemp(prefix="wb-body-limits-")
 os.environ["ACCOUNTS_DIR"] = os.path.join(_TMP, "accounts")
 os.environ["WB_PROXY_USAGE_DIR"] = _TMP
-# 上限与客户端超时都写进环境变量：模块在导入时读取
+# 上限与客户端超时在模块导入时从环境变量读取
 os.environ["WB_MAX_PAYLOAD_BYTES"] = "4096"
 os.environ["WB_CLIENT_TIMEOUT"] = "2"
 

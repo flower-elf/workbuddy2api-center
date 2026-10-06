@@ -1,4 +1,4 @@
-// 命令面板的条目与匹配规则。纯函数，便于在 Node 里测试。
+// 命令面板的条目与匹配规则，纯函数，便于在 Node 里测试。
 import { ROUTES, SETTINGS_TABS } from '../core/routes.js';
 
 /** 全部可跳转的目的地：页面在前，设置页各标签紧随其后。 */

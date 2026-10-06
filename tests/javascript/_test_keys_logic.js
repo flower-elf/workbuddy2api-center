@@ -1,6 +1,4 @@
-/* 密钥页纯逻辑：状态分档与汇总、掩码与配额显示、IP 白名单校验、表单校验与提交载荷、
- * 逐行提交时对服务端未返回字段的保护、创建成功后的客户端接入片段。
- *
+/* 密钥页纯逻辑：状态分档、掩码与配额显示、IP 白名单校验、表单校验与提交载荷、逐行提交的字段保护、客户端接入片段。
  * 运行：node tests/javascript/_test_keys_logic.js
  */
 import assert from 'node:assert/strict';
@@ -18,7 +16,7 @@ const keyRow = (over = {}) => Object.assign({
 
 const used = (over = {}) => keyRow(Object.assign({ usage: { requests: 3, total_tokens: 500, credit: 2.5, last_used_at: sec(now) - 600 } }, over));
 
-// ---- 状态分档：停用优先于过期与配额，过期优先于配额，配额按「用满即停」
+// ---- 状态分档：停用优先于过期，过期优先于配额，配额用满即停
 assert.equal(logic.deriveKeyStatus(used(), now), 'ok');
 assert.equal(logic.deriveKeyStatus(used({ enabled: false, expires_at: sec(now) - 1, quota_tokens: 1 }), now), 'disabled',
   '停用的密钥不该被画成过期或超配额');
@@ -32,7 +30,7 @@ assert.equal(logic.deriveKeyStatus(used({ quota_credit: 2.5 }), now), 'quota_exc
 assert.equal(logic.deriveKeyStatus(used({ quota_credit: 0, quota_tokens: 0 }), now), 'ok',
   '配额为 0 表示不限，用到多少都不算超');
 assert.equal(logic.deriveKeyStatus(used({ expires_at: sec(now) + 1 }), now), 'ok');
-// 服务端给了 status 就以它为准（后端口径变了，面板不该自己另算一套）。
+// 服务端给了 status 就以它为准，面板不自己另算
 assert.equal(logic.deriveKeyStatus(keyRow({ status: 'quota_exceeded' }), now), 'quota_exceeded');
 assert.equal(logic.deriveKeyStatus(keyRow({ status: 'ok', enabled: false }), now), 'ok');
 
@@ -46,7 +44,7 @@ const summary = logic.summarizeKeys([
 assert.deepEqual(summary, { total: 5, ok: 2, disabled: 1, expired: 1, quota_exceeded: 1 },
   '表头汇总要按同一套分档统计: ' + JSON.stringify(summary));
 
-// ---- 认证状态：只要有一把启用的密钥，服务端就要求携带 Key（过期、超配额的那些同样把门）
+// ---- 认证状态：有一把启用的密钥就要求携带 Key，过期与超配额的同样把门
 const gate = logic.authSummary({ api_keys: [keyRow({ status: 'expired', expires_at: sec(now) - 10 })] });
 assert.equal(gate.kind, 'panel', '只剩过期密钥时接口仍在把关: ' + JSON.stringify(gate));
 assert.ok(gate.text.includes('1'), '要写出有几把密钥在把关: ' + gate.text);
@@ -57,7 +55,7 @@ assert.equal(logic.authSummary({ api_key_set: true, api_key_set_by_panel: true, 
   '设置文件里保存的单个 Key 同样在把关，不能说不校验');
 assert.ok(logic.authSummary({ api_key_set: true, api_key_set_by_panel: true, api_key_masked: 'wbk-****' }).text.includes('wbk-****'),
   '要给出掩码，好认出是哪把密钥');
-// 列表里已经有密钥时，接口只认列表里的（服务端 identify_key 的口径）：启动参数那把不再生效。
+// 服务端 identify_key 的口径：列表里已有密钥时只认列表里的，启动参数那把不再生效
 const mixed = logic.authSummary({ api_key_set: true, api_key_set_by_panel: false, api_key_masked: 'wbk-****', api_keys: [keyRow({})] });
 assert.equal(mixed.kind, 'panel', '列表里有启用的密钥时不能说成启动参数在把关: ' + JSON.stringify(mixed));
 const locked = logic.authSummary({ api_key_set: true, api_key_set_by_panel: false, api_key_masked: 'wbk-****', api_keys: [keyRow({ enabled: false, status: 'disabled' })] });
@@ -102,7 +100,7 @@ assert.ok(logic.expiryText(keyRow({ expires_at: sec(now) - 86400 }), now).includ
 assert.ok(!logic.expiryText(keyRow({ expires_at: sec(now) + 86400 }), now).includes('已过期'),
   '没过期的不能标已过期');
 
-// ---- IP 白名单：逐条校验，写错的条目必须报出来而不是被悄悄丢掉
+// ---- IP 白名单：逐条校验，写错的条目必须报出来
 const allow = logic.parseIpAllowlist('10.0.0.1\n192.168.0.0/16, 203.0.113.7\n\n10.0.0.1');
 assert.deepEqual(allow, { ok: true, list: ['10.0.0.1', '192.168.0.0/16', '203.0.113.7'], invalid: [] },
   '换行、逗号、空格混合输入都要认，重复的去掉: ' + JSON.stringify(allow));
@@ -118,7 +116,7 @@ for (const badIp of ['', '10.0.0', '10.0.0.256', '10.0.0.1/33', '10.0.0.1/-1', '
   assert.equal(logic.isIpOrCidr(badIp), false, JSON.stringify(badIp) + ' 应当被拒绝');
 }
 
-// ---- 表单校验：与服务端同一口径（新密钥至少 4 个字符、天数是正整数、配额非负）
+// ---- 表单校验：与服务端同一口径，新密钥至少 4 个字符、天数是正整数、配额非负
 const form = (over = {}) => Object.assign(logic.formFromRow({}), over);
 
 assert.notEqual(logic.validateKeyForm(form()), '', '新建时没填密钥内容要拦下来');
@@ -143,7 +141,7 @@ const ipError = logic.validateKeyForm(form({ keyValue: 'abcd', ipText: '10.0.0.1
 assert.ok(ipError.includes('10.0.0.999'), '不合法 IP 要在错误里指名道姓: ' + ipError);
 assert.equal(logic.validateKeyForm(form({ keyValue: 'abcd', ipText: '10.0.0.1\n192.168.0.0/16' })), '');
 
-// ---- 表单 → 载荷：省略字段表示保持原值，天数是绝对时间戳
+// ---- 表单 → 载荷：省略字段表示保持原值，有效期是绝对时间戳
 const created = logic.buildKeyEntry(form({ keyValue: 'abcd', name: '  甲组  ', realm: 'cn', expiryMode: 'days', expiryDays: 7 }), now);
 assert.equal(created.expires_at, sec(now) + 7 * 86400, '有效期要换算成绝对时间戳');
 assert.equal(created.name, '甲组');
@@ -176,7 +174,7 @@ assert.deepEqual(logic.removePatternAt(['a', 'b', 'c'], 1), ['a', 'c']);
 assert.deepEqual(logic.removePatternAt(['a', 'b'], 9), ['a', 'b']);
 assert.deepEqual(logic.parsePatternInput('gpt-6-astra'), ['gpt-6-astra']);
 
-// ---- 列表行 → 提交载荷：服务端没给的字段不提交，服务端给过的字段原样带上
+// ---- 列表行 → 提交载荷：服务端没给的字段不提交，给过的原样带上
 const servedRow = keyRow({ models: ['glm-*'], expires_at: sec(now) + 86400, quota_tokens: 10, quota_credit: 1, ip_allowlist: ['10.0.0.1'] });
 const servedPayload = logic.keyRowPayload(servedRow);
 assert.deepEqual(servedPayload.models, ['glm-*']);
@@ -215,7 +213,7 @@ assert.ok(byId.anthropic.includes('ANTHROPIC_AUTH_TOKEN=wbk-secret-0001'));
 for (const snippet of snippets) assert.ok(snippet.text.includes('wbk-secret-0001'), snippet.id + ' 片段里没有密钥');
 assert.ok(!byId.curl.includes('//v1'), '基址末尾多斜杠不能拼出双斜杠');
 
-// ---- 随机密钥：36 位十六进制，且每次都不一样
+// ---- 随机密钥：36 位十六进制，每次生成都不同
 const random = logic.randomKeyValue();
 assert.match(random, /^[0-9a-f]{36}$/, '随机密钥要是 18 字节的十六进制: ' + random);
 assert.notEqual(logic.randomKeyValue(), random, '两次生成不能是同一个值');

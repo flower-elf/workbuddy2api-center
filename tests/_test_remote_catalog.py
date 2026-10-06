@@ -1,20 +1,6 @@
-"""The advertised catalogue follows the desktop product-config endpoint.
+"""目录直接调用桌面端的 product-config 端点(GET /v3/config)并筛选(issue #85):丢弃别名,-sg/-x 视为付费版本,同名有免费("x0.00")变体时用免费的那个。
 
-Issue #85: the gateway used to read the desktop client's *cached* copy of
-GET /v3/config, so a machine without the desktop app could only offer the
-narrow model endpoint or the bundled snapshot. It now calls the endpoint
-itself and curates the result:
-
-  - virtual aliases (default-model ... auto) are dropped: they are picker
-    shorthands, not models;
-  - "-sg" / "-x" builds are the paid variant of a name the list already has;
-  - when a free ("x0.00") sibling exists, the free one is the advertised
-    one (deepseek-v4.1-flash over -sg, hy4-preview-f over hy4-preview);
-  - a name only the curated tables know - the free hy4-preview-f on the
-    domestic exit, which the remote no longer lists - survives, and a name
-    only the remote knows (grok-4.7) ships without a release.
-
-No network: the payloads are synthesised and the fetch is stubbed.
+不联网:payload 合成,获取流程打桩。
 """
 import os
 import json
@@ -151,7 +137,7 @@ class RemoteCatalogTests(unittest.TestCase):
         self.assertTrue(info["fetched_at"])
 
     def test_live_reasoning_efforts_win_over_the_bundled_table(self):
-        """活目录声明的推理档位就是答案，写死的值不能盖住它。"""
+        """活目录声明的推理档位就是答案，固定值不能盖住它。"""
         meta = dict(INTL_META)
         meta["deepseek-v4.1-flash"] = {
             "credits": "x0.00",
@@ -166,7 +152,6 @@ class RemoteCatalogTests(unittest.TestCase):
         self.assertEqual(item["reasoning_default_effort"], "medium")
 
     def test_bundled_efforts_fill_in_when_the_live_entry_has_none(self):
-        """活目录对某个模型没给 reasoning 时，仍回落到内置快照。"""
         P.fetch_remote_product_config = (
             lambda realm: (INTL_IDS, INTL_META) if realm == "intl" else None)
         entries = dict(P.fetch_models("intl")[0])
@@ -185,7 +170,7 @@ class RemoteCatalogTests(unittest.TestCase):
         self.assertNotIn("auto", ids)          # auto-router alias
 
     def test_saved_catalogue_answers_without_the_server(self):
-        """一次成功获取在 24 小时内直接使用，不再联系服务器。"""
+        """一次成功获取后 24 小时内直接用磁盘缓存回答,不联系服务器。"""
         calls = []
 
         def remote(realm):
@@ -195,7 +180,7 @@ class RemoteCatalogTests(unittest.TestCase):
         P.fetch_remote_product_config = remote
         self.assertEqual(self.served("intl")[0], "hy4-preview-f")
         self.assertEqual(calls, ["intl"])
-        # 清掉内存副本，模拟进程重启后只有磁盘缓存的状态
+        # 清掉内存副本,模拟重启后只剩磁盘缓存
         P._models_cache["intl"] = {"at": 0.0, "data": None}
         ids, info = P.fetch_models("intl")
         self.assertEqual([m for m, _ in ids][0], "hy4-preview-f")

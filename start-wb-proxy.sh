@@ -8,8 +8,7 @@
 #
 #  On macOS you can also double-click start-wb-proxy.command.
 #
-#  This is the POSIX counterpart of start-wb-proxy.bat. The .bat
-#  launchers are left in place for Windows users.
+#  POSIX counterpart of start-wb-proxy.bat.
 # ===========================================================
 
 set -u
@@ -17,7 +16,6 @@ set -u
 PORT="${1:-8788}"
 
 # --- resolve the directory this script lives in --------------------
-# Works when double-clicked, run as ./script, or reached via a symlink.
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SOURCE" ]; do
   DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"

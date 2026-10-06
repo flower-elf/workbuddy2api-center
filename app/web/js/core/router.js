@@ -2,8 +2,8 @@ import { ROUTES, findRoute } from './routes.js';
 import { refreshSeconds, onRefreshSeconds } from './refresh.js';
 
 // 路由：地址形如 #/accounts 或 #/settings/proxy。
-// 页面模块导出 mount(host, ctx)，返回 { refresh, unmount }；导出 autoRefresh 的页面按设置的间隔刷新，
-// 导出 refreshMs 的页面按自己的固定节奏刷新（运行日志的实时跟随）。
+// 页面模块导出 mount(host, ctx)，返回 { refresh, unmount }；另有 autoRefresh 表示按设置的间隔刷新，
+// refreshMs 表示按页面自带的固定节奏刷新。
 let host = null;
 let current = null;      // { route, sub, instance, timer }
 let generation = 0;
@@ -51,7 +51,7 @@ async function runRefresh(entry) {
   }
 }
 
-/** 挂上定时器：页面自带固定节奏时用自己的毫秒数，否则用设置的间隔；间隔为 0 或页面不自动刷新就不挂。 */
+/** 页面自带固定节奏时用 refreshMs，否则用设置的间隔；间隔为 0 或页面不自动刷新就不挂定时器。 */
 function armRefresh(entry) {
   if (entry.timer) clearInterval(entry.timer);
   entry.timer = null;
@@ -60,7 +60,6 @@ function armRefresh(entry) {
   if (ms > 0) entry.timer = setInterval(() => runRefresh(entry), ms);
 }
 
-// 间隔改动后立刻按新值重挂当前页面的定时器。
 onRefreshSeconds(() => { if (current) armRefresh(current); });
 
 async function show() {
@@ -73,7 +72,7 @@ async function show() {
   if (navGuard && current && (path !== current.route.path || sub !== current.sub)) {
     const ok = await navGuard({ path, sub });
     if (!ok) {
-      // 取消这次跳转：地址栏改回当前页面，不重新挂载。
+      // 取消跳转：地址栏改回当前页面，不重新挂载。
       history.replaceState(null, '', hrefFor(current.route.path, current.sub));
       return;
     }
@@ -93,7 +92,7 @@ async function show() {
   onChange(route, sub);
 }
 
-/** 重新挂载当前页面：切换查看的版本后调用，旧版本的数据不会残留在新版本的页面里。 */
+/** 切换查看的版本后调用，重新挂载当前页面，旧版本的数据不会残留在新版本里。 */
 export function remount() {
   if (current) show();
 }

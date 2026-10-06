@@ -1,30 +1,26 @@
 # WorkBuddy Multi-Account Reverse Proxy Gateway
 FROM python:3.11-alpine
 
-# Set environment
 ENV PYTHONUNBUFFERED=1     HOST=0.0.0.0     PORT=8788     API_KEY=     TZ=Asia/Shanghai
 
 WORKDIR /app
 
-# Alpine timezone & certs
 RUN apk add --no-cache tzdata ca-certificates &&     cp /usr/share/zoneinfo/${TZ} /etc/localtime &&     echo "${TZ}" > /etc/timezone
 
-# Copy application files (Zero external pip dependencies needed)
+# Copy app files; no pip dependencies needed
 COPY app/ ./app/
 
-# Create data directories
 RUN mkdir -p /app/accounts /app/usage
 
-# Volume persistence for credentials and usage logs
+# Persist credentials and usage logs
 VOLUME ["/app/accounts", "/app/usage"]
 
 EXPOSE 8788
 
-# Launch the proxy in the project's LAN mode: --lan listens on every interface
-# and forces an api key (generated once, persisted in ./accounts/settings.json
-# and printed in the startup log). Without it the container published port 8788
-# to the network while key checking stayed off.
-# No --port on purpose: the gateway already reads PORT from the environment
-# (default 8788), and the exec form cannot expand a variable. Keeping the exec
-# form leaves python as PID 1, so `docker stop` still delivers SIGTERM.
+# 端口探活：账号池为空时 /health 会返回 503，因此健康检查只确认端口已监听
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD python -c "import os,socket; socket.create_connection(('127.0.0.1', int(os.environ.get('PORT', '8788'))), 3).close()"
+
+# --lan 监听所有网卡并强制 API Key，首次生成后写入 ./accounts/settings.json 并打印在日志。
+# 不写 --port：网关自己读 PORT；exec 形式让 python 保持 PID 1，docker stop 才能送达 SIGTERM。
 CMD ["python", "app/wb_proxy.py", "--host", "0.0.0.0", "--lan"]

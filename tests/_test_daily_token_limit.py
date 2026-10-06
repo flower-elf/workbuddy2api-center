@@ -1,14 +1,6 @@
-"""The daily token guard parks an account once today's usage reaches the limit.
+"""The daily token guard parks an account once today's usage reaches the limit; upstream code 6004 caps a free window.
 
-The upstream caps a free window at a fixed token budget (code 6004), and by the
-time it answers 429 the day is already spent. This guard lets the operator park
-an account at a local threshold instead, so the next request rotates away
-before the upstream has to refuse. Two things matter and are pinned here: the
-counter folds usage.jsonl incrementally (only rows at/after local midnight,
-skipping client cancellations) and an account only blocks on a *counted* day -
-an unknown count must never park anyone.
-
-No network: the usage log is synthesised in a temp directory.
+No network: usage.jsonl is folded incrementally from local midnight, skipping client cancellations; an unknown count never parks anyone.
 """
 import io
 import json
@@ -60,9 +52,9 @@ class DailyTokenLimitTests(unittest.TestCase):
         midnight = P._local_midnight()
         rows = [
             row(midnight - 3600, "acct-A", 999999),   # yesterday: ignored
-            row(midnight + 60, "acct-A", 1200),       # today
-            row(midnight + 120, "acct-A", 800),       # today
-            row(midnight + 180, "acct-B", 300),       # today
+            row(midnight + 60, "acct-A", 1200),
+            row(midnight + 120, "acct-A", 800),
+            row(midnight + 180, "acct-B", 300),
             row(midnight + 240, "acct-A", 7777, outcome="client_aborted"),
         ]
         with io.open(P.USAGE_LOG, "w", encoding="utf-8") as fh:
@@ -71,15 +63,13 @@ class DailyTokenLimitTests(unittest.TestCase):
         self.assertEqual(P.daily_tokens_by_account(ttl=0),
                     {"acct-A": 2000, "acct-B": 300})
 
-        # The counter resumes from its byte offset: a row appended after the
-        # first scan is folded in without recounting the file.
+        # Resume from the byte offset: a row appended after the first scan is folded in without recounting.
         with io.open(P.USAGE_LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(row(midnight + 300, "acct-B", 100)) + "\n")
         self.assertEqual(P.daily_tokens_by_account(ttl=0),
                     {"acct-A": 2000, "acct-B": 400})
 
-        # A row still being written (no trailing newline) is left for the next
-        # scan instead of being half-counted.
+        # A row with no trailing newline waits for the next scan instead of being half-counted.
         with io.open(P.USAGE_LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(row(midnight + 400, "acct-A", 50)))
         self.assertEqual(P.daily_tokens_by_account(ttl=0),

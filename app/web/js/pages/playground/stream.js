@@ -1,8 +1,7 @@
 import { createParser } from '../../../vendor/eventsource-parser-4.1.1/index.js';
 import { applyChunk, emptyAnswer, responseError } from './logic.js';
 
-// 流式对话的传输层：POST 请求体，用 eventsource-parser 解析响应体里的 SSE。
-// 请求头由调用方给出（面板会话令牌与 X-Realm），fetch 也可以替换，便于在 Node 里测试。
+// 流式对话的传输层：POST 请求体，用 eventsource-parser 解析响应体里的 SSE；请求头由调用方给出（面板会话令牌与 X-Realm），fetch 可替换以便在 Node 里测试。
 
 export class StreamError extends Error {
   constructor(status, message) {
@@ -21,7 +20,7 @@ function parseJSON(text) {
 }
 
 /**
- * 打开一次流式对话。onUpdate 拿到累积后的回答状态；返回最终状态。
+ * 打开一次流式对话，返回最终状态；onUpdate 拿到累积后的回答状态。
  * 用户中止时返回的状态带 stopped: true，已经收到的内容保留。
  */
 export async function streamChat({ url, headers, body, signal, onUpdate, fetchImpl }) {

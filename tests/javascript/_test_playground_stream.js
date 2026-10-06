@@ -1,6 +1,5 @@
-/* 测试台的 SSE 传输层：分片切在任意位置也要正确累积，错误响应要抛出清理后的说明。
- *
- * Run with Node: node tests/javascript/_test_playground_stream.js
+/* 测试台的 SSE 传输层：分片在任意位置切开也要正确累积，错误响应要抛出清理后的说明。
+ * 运行：node tests/javascript/_test_playground_stream.js
  */
 import assert from 'node:assert/strict';
 import { StreamError, streamChat } from '../../app/web/js/pages/playground/stream.js';
@@ -31,7 +30,7 @@ const sse = [
   'data: [DONE]\n\n',
 ].join('');
 
-// 正常流：把字节按 7 个一切，模拟网络任意切分
+// 正常流：按 7 字节切片，模拟任意网络分片
 const bytes = encoder.encode(sse);
 const slices = [];
 for (let i = 0; i < bytes.length; i += 7) slices.push(bytes.slice(i, i + 7));
@@ -60,7 +59,7 @@ assert.equal(answer.stopped, undefined);
 assert.ok(updates.length >= 3, '每个分片都会通知一次');
 assert.ok(updates.includes('你好'), updates.join('|'));
 
-// 流里的错误分片：错误进入 error，内容保持空
+// 流里的错误分片
 const errored = await streamChat({
   url: '/v1/chat/completions',
   headers: {},
@@ -70,14 +69,14 @@ const errored = await streamChat({
 assert.equal(errored.error, 'upstream 503 overloaded');
 assert.equal(errored.content, '');
 
-// 非 JSON 的数据行按协议忽略，后面的分片照常累积
+// 非 JSON 数据行按协议忽略
 const noisy = await streamChat({
   url: '/x', headers: {}, body: {},
   fetchImpl: async () => responseOf(['event: ping\ndata: keep-alive\n\n', 'data: {"choices":[{"delta":{"content":"好"}}]}\n\n']),
 });
 assert.equal(noisy.content, '好');
 
-// 非 2xx：抛出带状态与清理后说明的错误，HTML 不落到界面上
+// 非 2xx：抛出带状态与清理后说明的错误
 await assert.rejects(
   () => streamChat({
     url: '/v1/chat/completions', headers: {}, body: {},
@@ -108,7 +107,7 @@ await assert.rejects(
   (err) => err instanceof StreamError && /流式响应体/.test(err.message),
 );
 
-// 请求还没返回就中止：按「已终止」返回，不当成请求失败
+// 请求还没返回就中止：按已终止返回，不当成请求失败
 {
   const controller = new AbortController();
   const stopped = await streamChat({
@@ -123,7 +122,7 @@ await assert.rejects(
   assert.equal(stopped.error, '');
 }
 
-// 用户中止：保留已经收到的内容并标记 stopped
+// 用户中止：保留已收到的内容并标记 stopped
 {
   const controller = new AbortController();
   let push;

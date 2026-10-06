@@ -1,8 +1,5 @@
-"""Deterministic tests for per-account outbound proxy support.
-
-No external network: a local stub proxy records absolute-URI requests and
-answers with canned JSON, so we can prove an account's traffic is routed
-through its configured proxy instead of the default direct opener.
+"""Per-account outbound proxy tests: a local stub proxy records absolute-URI requests and
+answers canned JSON. No external network.
 """
 
 import json
