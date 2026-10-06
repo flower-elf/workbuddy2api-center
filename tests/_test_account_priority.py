@@ -288,7 +288,8 @@ class DebugAccountPinTests(unittest.TestCase):
 
     def open_pinned(self, uid, model="glm-5.3"):
         payload = {"model": model, "messages": [{"role": "user", "content": "hi"}]}
-        return P.open_upstream(payload, target_realm="intl", only_uid=uid)
+        return P.open_upstream(payload, target_realm="intl", only_uid=uid,
+                               lease=P.SlotLease())
 
     def test_the_named_account_serves_the_request(self):
         response, used, _ = self.open_pinned("uid-other")
@@ -360,6 +361,42 @@ class ParsePriorityTests(unittest.TestCase):
                 self.assertIsNone(got)
                 self.assertEqual(problem, PRIORITY_ERROR,
                                  "value %r reported %r" % (value, problem))
+
+
+class ParseConcurrencyTests(unittest.TestCase):
+    """/accounts/set 收 0 到 1000 的整数；0 表示不限。"""
+
+    def test_whole_numbers_in_range_pass(self):
+        for value in (0, 1, 1000, "12"):
+            with self.subTest(value=value):
+                self.assertEqual(wb_accounts.normalise_concurrency_limit(value),
+                                 (int(value), ""))
+
+    def test_everything_else_is_rejected_with_the_same_message(self):
+        expected = ("concurrencyLimit must be between 0 and %d"
+                    % wb_accounts.MAX_ACCOUNT_CONCURRENCY)
+        for value in (-1, 1001):
+            with self.subTest(value=value):
+                got, problem = wb_accounts.normalise_concurrency_limit(value)
+                self.assertIsNone(got)
+                self.assertEqual(problem, expected)
+        # 非整数与布尔值一律不算数，错误文案统一（与优先级同一个口径）。
+        for value in (True, False, 1.5, None, "abc"):
+            with self.subTest(value=value):
+                got, problem = wb_accounts.normalise_concurrency_limit(value)
+                self.assertIsNone(got)
+                self.assertEqual(
+                    problem, "concurrencyLimit must be a non-negative whole number")
+
+    def test_the_route_stores_it_and_lists_it_back(self):
+        pool = pool_with(account("uid-cap"))
+        row = pool.set_concurrency_limit("uid-cap", 3)
+        self.assertEqual(row["concurrencyLimit"], 3)
+        self.assertEqual(pool.get("uid-cap").public()["concurrencyLimit"], 3)
+        self.assertEqual(pool.get("uid-cap").public()["activeRequests"], 0,
+                         "面板要能读到当前在途请求数（这里还没有请求）")
+        self.assertIsNone(pool.set_concurrency_limit("nobody", 3),
+                          "没有这个账号时要返回 None，路由据此回 404")
 
 
 if __name__ == "__main__":

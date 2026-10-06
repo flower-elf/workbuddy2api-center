@@ -148,7 +148,7 @@ class OpenUpstreamTests(unittest.TestCase):
 
     def effort_of(self, payload):
         _resp, _account, effort = P.open_upstream(
-            payload, session_key="s-effort", target_realm="intl")
+            payload, session_key="s-effort", target_realm="intl", lease=P.SlotLease())
         return effort
 
     def test_the_camelcase_effort_comes_back(self):
@@ -200,6 +200,9 @@ class FakeUpstream(object):
 
 class FakeAccount(object):
     uid = "acct-effort"
+
+    def release_request(self, model=None):
+        """账号并发名额：真实 Account 在响应体读完时释放，这个桩不需要计数。"""
 
 
 class FakeHandler(object):

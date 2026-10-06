@@ -60,6 +60,9 @@ class FakeUpstream(object):
 class FakeAccount(object):
     uid = "acct-test"
 
+    def release_request(self, model=None):
+        """账号并发名额：真实的 Account 在响应体读完时释放，这个桩不计数。"""
+
 
 class ChatChunks(object):
     """A chat stream that thinks, talks and then calls one tool."""
@@ -197,7 +200,7 @@ def run_handler(payload, chunks, mode="openai-completions"):
         settings.set_messages_format(directory, mode)
         handler = MessagesHandler(payload)
         with mock.patch.multiple(proxy, ACCOUNTS_DIR=directory,
-                                 open_upstream=lambda body, session_key=None, target_realm=None:
+                                 open_upstream=lambda body, session_key=None, target_realm=None, lease=None:
                                      (FakeUpstream(sse(chunks)), FakeAccount(), None),
                                  record_usage=lambda *a, **k: None,
                                  record_error=lambda *a, **k: None):
@@ -461,7 +464,7 @@ class EndpointTest(unittest.TestCase):
         payload = base_request()
         handler = MessagesHandler(payload)
 
-        def refuse(body, session_key=None, target_realm=None):
+        def refuse(body, session_key=None, target_realm=None, lease=None):
             raise proxy.RateLimited("slow down", detail="reset at 12:00", wait=42)
 
         with tempfile.TemporaryDirectory(prefix="wb-messages-dir-") as directory:

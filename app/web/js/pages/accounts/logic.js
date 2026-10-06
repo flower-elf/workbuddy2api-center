@@ -6,6 +6,8 @@ import { fmtAgo, fmtNumber, toMillis } from '../../core/format.js';
 export const PAGE_SIZE = 20;
 export const PRIORITY_DEFAULT = 100;
 export const PRIORITY_MAX = 9999;
+//: 单账号单模型的并发上限，与服务端 MAX_ACCOUNT_CONCURRENCY 一致。
+export const CONCURRENCY_MAX = 1000;
 
 /** 四个展示分组，顺序即筛选芯片顺序：先正常、再要处理的、然后是等待中的、最后是停用的。 */
 export const AVAILABILITY_GROUPS = ['usable', 'attention', 'cooling', 'stopped'];
@@ -176,6 +178,32 @@ function creditKey(account) {
 export function priorityOf(account) {
   const value = Number(account && account.priority);
   return Number.isInteger(value) ? value : PRIORITY_DEFAULT;
+}
+
+/** 并发上限；没设过或旧账号当作 0（不限）。 */
+export function concurrencyOf(account) {
+  const value = Number(account && account.concurrencyLimit);
+  return Number.isInteger(value) && value > 0 ? value : 0;
+}
+
+/** 正在服务的请求数，用来解释为什么这个账号暂不接单。 */
+export function activeRequestsOf(account) {
+  const value = Number(account && account.activeRequests);
+  return Number.isInteger(value) && value > 0 ? value : 0;
+}
+
+/**
+ * 并发上限的输入校验：0 或空表示不限，其余必须是正整数。
+ * 与服务端 normalise_concurrency_limit 同一口径，本地先拦一道。
+ */
+export function parseConcurrencyInput(raw) {
+  const text = String(raw == null ? '' : raw).trim();
+  if (text === '') return { ok: true, value: 0 };
+  const value = Number(text);
+  if (!Number.isInteger(value) || value < 0 || value > CONCURRENCY_MAX) {
+    return { ok: false, message: '并发上限需要 0 到 ' + CONCURRENCY_MAX + ' 之间的整数，填 0 表示不限，本次没有发送请求' };
+  }
+  return { ok: true, value };
 }
 
 /** 排序。默认顺序把停用账号沉到最后，其余排序都保持稳定。 */

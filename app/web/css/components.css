@@ -69,6 +69,7 @@ html.dark .card .input, html.dark .card .select, html.dark .card .textarea { bac
 .input-sm, .select.input-sm { height: 32px; font-size: 12px; }
 .input-num { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
 .input-priority { width: 72px; text-align: center; }
+.input-concurrency { width: 72px; text-align: center; }
 .textarea { height: auto; min-height: 64px; padding: 8px 12px; resize: vertical; line-height: 1.5; }
 .select {
   appearance: none; -webkit-appearance: none; width: auto; padding-right: 32px; cursor: pointer;

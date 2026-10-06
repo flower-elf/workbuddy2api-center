@@ -49,6 +49,10 @@ export function setPriority(uid, priority) {
   return postJSON('/accounts/set', { uid, priority });
 }
 
+export function setConcurrencyLimit(uid, concurrencyLimit) {
+  return postJSON('/accounts/set', { uid, concurrencyLimit });
+}
+
 export function saveNote(uid, note) {
   return postJSON('/accounts/set', { uid, note });
 }

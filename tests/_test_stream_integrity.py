@@ -147,7 +147,7 @@ class HandlerStub(object):
         return [line for line in self.body().split("\n") if line.startswith(":")]
 
 
-def run(method, upstream, *args):
+def run(method, upstream, *args, **kwargs):
     """Call one relay on a stub handler with the accounting calls captured."""
     handler = HandlerStub()
     usage_rows, error_rows = [], []
@@ -159,7 +159,7 @@ def run(method, upstream, *args):
         error_rows.append(dict(kw, model=model, status=status, message=message))
 
     with mock.patch.multiple(proxy, record_usage=capture_usage, record_error=capture_error):
-        getattr(handler, method)(upstream, *args)
+        getattr(handler, method)(upstream, *args, **kwargs)
     return handler, usage_rows, error_rows
 
 
@@ -193,7 +193,7 @@ class HeartbeatTests(unittest.TestCase):
         upstream = FakeUpstream([b": ping\n"] + data_lines(text_delta("hi"))
                                 + [b"data: [DONE]\n"])
         handler, drop, errors = run("_responses_stream_response", upstream, MODEL, set(), {},
-                                    None, FakeAccount(), time.time())
+                                    None, FakeAccount(), time.time(), lease=proxy.SlotLease())
         self.assertEqual(handler.comments(), [": ping"])
         self.assertEqual(handler.events()[-1][0], "response.completed")
         self.assertFalse(errors)
@@ -301,7 +301,7 @@ class ResponsesStreamTests(unittest.TestCase):
     def test_truncated_stream_fails(self):
         upstream = FakeUpstream(data_lines(text_delta("half an answer")))
         handler, usage, errors = run("_responses_stream_response", upstream, MODEL, set(), {},
-                                     None, FakeAccount(), time.time())
+                                     None, FakeAccount(), time.time(), lease=proxy.SlotLease())
         events = handler.events()
         self.assertEqual(events[-1][0], "response.failed")
         self.assertNotIn("response.completed", [e for e, _ in events])
@@ -314,7 +314,7 @@ class ResponsesStreamTests(unittest.TestCase):
     def test_error_frame_fails_the_response(self):
         upstream = FakeUpstream(data_lines(text_delta("half"), {"error": {"message": "boom"}}))
         handler, usage, errors = run("_responses_stream_response", upstream, MODEL, set(), {},
-                                     None, FakeAccount(), time.time())
+                                     None, FakeAccount(), time.time(), lease=proxy.SlotLease())
         failed = json.loads(handler.events()[-1][1])["response"]
         self.assertIn("boom", failed["error"]["message"])
         self.assertEqual(errors[0]["status"], 502)
@@ -323,7 +323,7 @@ class ResponsesStreamTests(unittest.TestCase):
         upstream = FakeUpstream(data_lines(text_delta("half")),
                                 raises=http.client.IncompleteRead(b"x", 5))
         handler, usage, errors = run("_responses_stream_response", upstream, MODEL, set(), {},
-                                     None, FakeAccount(), time.time())
+                                     None, FakeAccount(), time.time(), lease=proxy.SlotLease())
         self.assertEqual(handler.events()[-1][0], "response.failed")
         self.assertIn("stream aborted", json.loads(handler.events()[-1][1])["response"]["error"]["message"])
         self.assertEqual(errors[0]["status"], 502)
@@ -331,7 +331,7 @@ class ResponsesStreamTests(unittest.TestCase):
     def test_complete_stream_still_completes(self):
         upstream = FakeUpstream(data_lines(text_delta("hi"), finish()) + [b"data: [DONE]\n"])
         handler, usage, errors = run("_responses_stream_response", upstream, MODEL, set(), {},
-                                     None, FakeAccount(), time.time())
+                                     None, FakeAccount(), time.time(), lease=proxy.SlotLease())
         self.assertEqual(handler.events()[-1][0], "response.completed")
         self.assertFalse(errors)
         self.assertEqual(usage[0]["outcome"], "completed")
@@ -379,7 +379,8 @@ class MessagesStreamTests(unittest.TestCase):
     def test_responses_pipeline_error_event(self):
         upstream = FakeUpstream(data_lines(text_delta("half")))
         handler, usage, errors = run("_messages_stream_from_responses", upstream, MODEL, set(), {},
-                                     CHAT_REQ, None, None, FakeAccount(), time.time(), None)
+                                     CHAT_REQ, None, None, FakeAccount(), time.time(), None,
+                                     lease=proxy.SlotLease())
         events = handler.events()
         self.assertEqual(events[-1][0], "error")
         self.assertNotIn("message_stop", [e for e, _ in events])
@@ -388,7 +389,8 @@ class MessagesStreamTests(unittest.TestCase):
     def test_responses_pipeline_complete_stream(self):
         upstream = FakeUpstream(data_lines(text_delta("hi"), finish()) + [b"data: [DONE]\n"])
         handler, usage, errors = run("_messages_stream_from_responses", upstream, MODEL, set(), {},
-                                     CHAT_REQ, None, None, FakeAccount(), time.time(), None)
+                                     CHAT_REQ, None, None, FakeAccount(), time.time(), None,
+                                     lease=proxy.SlotLease())
         self.assertEqual(handler.events()[-1][0], "message_stop")
         self.assertFalse(errors)
 

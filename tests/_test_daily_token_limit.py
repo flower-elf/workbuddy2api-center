@@ -156,10 +156,11 @@ class DailyTokenLimitTests(unittest.TestCase):
             def count_ready(self, realm, model=None):
                 return sum(a.ready(model=model) for a in self.accounts)
 
-            def pick_for_session(self, realm, session_key=None, exclude=(), model=None):
+            def pick_for_session(self, realm, session_key=None, exclude=(), model=None,
+                                 claim=None):
                 return next((a for a in self.accounts if a.uid not in exclude
                             and a.realm == realm
-                            and a.ready(model=model)), None)
+                            and a.ready(model=model) and claim(a)), None)
 
             def apply_daily_token_limit(self, value=None, usage=None):
                 return value or 0
@@ -171,7 +172,7 @@ class DailyTokenLimitTests(unittest.TestCase):
                 P.open_upstream(
                     {"model": "deepseek-v4.1-flash",
                      "messages": [{"role": "user", "content": "hi"}]},
-                    target_realm="intl")
+                    target_realm="intl", lease=P.SlotLease())
         finally:
             P.POOL = old_pool
             wb_settings.set_daily_token_limit(os.environ["ACCOUNTS_DIR"], 0)

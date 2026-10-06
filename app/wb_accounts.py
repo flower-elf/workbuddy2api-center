@@ -224,6 +224,8 @@ DEFAULT_ACCOUNT_PRIORITY = 100
 #: Account files are hand-editable, so a priority outside this range is clamped
 #: instead of skewing the selection order.
 MAX_ACCOUNT_PRIORITY = 9999
+#: 单账号单模型的并发上限：同一账号的每个模型各自计数，0 表示不限。
+MAX_ACCOUNT_CONCURRENCY = 1000
 #: 评分分配按最近一小时被选中的次数判断账号忙不忙，由 mark_pick() 记下的
 #: 选中时刻算出来。
 LOAD_WINDOW_SECONDS = 3600
@@ -344,6 +346,8 @@ class Account(object):
         # 面板备注：跟着凭证文件走，重新登录与桌面端导入不会带上它，
         # AccountPool.add() 因此把它列进 KEEP_ON_REPLACE_FIELDS。
         self.note = _stored_note(data.get("note"))
+        # 单账号单模型的并发上限：0 表示不限。计数在内存里，重启即清空。
+        self.concurrency_limit = _stored_concurrency_limit(data.get("concurrencyLimit"))
         self.last_error = str(data.get("lastError") or "")
         self.cooldown_until = float(data.get("cooldownUntil") or 0)
         # Per-model throttling. Upstream rate limits (code 6004 "usage exceeds
@@ -385,6 +389,9 @@ class Account(object):
         # The dashboard snapshots this state while request threads update it.
         # Keep it separate from _refresh_lock, which spans network requests.
         self._throttle_lock = threading.Lock()
+        # 在途请求计数：键是模型名；独立锁，面板读计数时不挡请求线程。
+        self._concurrency_lock = threading.Lock()
+        self._in_flight = {}
         # 删除标记：面板删掉账号后，请求线程手里的旧引用还会走到 save()，
         # 没有这个标记就会把刚删掉的凭证文件重新写出来。
         self.deleted = False
@@ -408,6 +415,7 @@ class Account(object):
             "enabled": self.enabled,
             "priority": self.priority,
             "note": self.note,
+            "concurrencyLimit": self.concurrency_limit,
             "lastError": self.last_error,
             "cooldownUntil": self.cooldown_until,
             "credits": self.credits,
@@ -514,6 +522,8 @@ class Account(object):
             "issuedAt": self.issued_at,
             "expiresIn": _human_delta(exp - time.time()) if exp else None,
             "hasRefreshToken": bool(self.refresh_token),
+            "concurrencyLimit": int(self.concurrency_limit or 0),
+            "activeRequests": self.active_requests,
             "lastError": last_error,
             "inCooldown": deadline > now,
             "cooldownFor": round(max(0.0, deadline - now)) or None,
@@ -1071,6 +1081,79 @@ class Account(object):
                 self.last_error = ""
                 self.cooldown_until = 0
 
+    # -- 单账号单模型的并发名额 ---------------------------------------------
+
+    def _capacity_key(self, model):
+        return str(model or "")
+
+    def active_for_model(self, model):
+        with self._concurrency_lock:
+            return self._in_flight.get(self._capacity_key(model), 0)
+
+    @property
+    def active_requests(self):
+        with self._concurrency_lock:
+            return sum(self._in_flight.values())
+
+    def has_request_capacity(self, model=None):
+        """这个账号在这个模型上还有空名额吗（上限为 0 时永远有）。"""
+        with self._concurrency_lock:
+            if self.concurrency_limit <= 0:
+                return True
+            return self._in_flight.get(self._capacity_key(model), 0) < self.concurrency_limit
+
+    def acquire_request(self, model=None):
+        """原子地占一个名额；已经满了返回 False。"""
+        key = self._capacity_key(model)
+        with self._concurrency_lock:
+            used = self._in_flight.get(key, 0)
+            if self.concurrency_limit > 0 and used >= self.concurrency_limit:
+                return False
+            self._in_flight[key] = used + 1
+            return True
+
+    def release_request(self, model=None):
+        key = self._capacity_key(model)
+        with self._concurrency_lock:
+            used = self._in_flight.get(key, 0) - 1
+            if used > 0:
+                self._in_flight[key] = used
+            else:
+                self._in_flight.pop(key, None)
+
+
+def _claim(account, model, claim):
+    """选号时的名额判定：有 claim 就原子地占名额，没有就只检查。"""
+    if claim is not None:
+        return claim(account)
+    return account.has_request_capacity(model)
+
+
+def normalise_concurrency_limit(value):
+    """Return (limit, error) for the per-account concurrency cap.
+
+    The cap counts in-flight requests per account *and* model, so 0 means
+    unlimited and a hand-edited file cannot smuggle in a negative or absurd
+    number.
+    """
+    if isinstance(value, bool) or value is None or (
+            isinstance(value, float) and not value.is_integer()):
+        return None, "concurrencyLimit must be a non-negative whole number"
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None, "concurrencyLimit must be a non-negative whole number"
+    if number < 0 or number > MAX_ACCOUNT_CONCURRENCY:
+        return None, ("concurrencyLimit must be between 0 and %d"
+                      % MAX_ACCOUNT_CONCURRENCY)
+    return number, ""
+
+
+def _stored_concurrency_limit(value):
+    limit, problem = normalise_concurrency_limit(value)
+    return 0 if problem else limit
+
+
 def _human_delta(seconds):
     if seconds is None: return None
     if seconds <= 0: return "expired"
@@ -1224,6 +1307,7 @@ KEEP_ON_REPLACE_FIELDS = (
     ("product", "product"),
     ("priority", "priority"),
     ("note", "note"),
+    ("concurrencyLimit", "concurrency_limit"),
     ("proxySlot", "proxy_slot"),
     ("proxy", "proxy_legacy"),
     ("credits", "credits"),
@@ -1511,6 +1595,15 @@ class AccountPool(object):
         account.save(self.dir)
         return account.public()
 
+    def set_concurrency_limit(self, uid, value):
+        """Persist one account's per-model concurrency cap (0 = unlimited)."""
+        account = self.get(uid)
+        if account is None:
+            return None
+        account.concurrency_limit = value
+        account.save(self.dir)
+        return account.public()
+
     def set_all_enabled(self, enabled, realm=None):
         with self._lock:
             for account in self.accounts:
@@ -1589,35 +1682,41 @@ class AccountPool(object):
             return "its token expired and could not be refreshed"
         return ""
 
-    def pick_for_session(self, realm=None, session_key=None, exclude=None, model=None):
+    def pick_for_session(self, realm=None, session_key=None, exclude=None, model=None,
+                         claim=None):
+        """选一个账号接这次请求。
+
+        claim(account) 选中前原子地占名额，占不到就跳过；不传时只检查。
+        """
         exclude = exclude or set()
         if session_key:
             bound_uid = self.affinity.get(session_key)
             if bound_uid and bound_uid not in exclude:
                 account = self.get(bound_uid)
-                if account and account.realm == realm and account.ready(model=model):
+                if (account and account.realm == realm and account.ready(model=model)
+                        and _claim(account, model, claim)):
                     # 绑定命中也算一次接单：评分分配按「最近一小时实际接到的
                     # 份额」判断一个账号忙不忙，漏掉这些请求会把最忙的账号
                     # 看成最闲的。
                     account.mark_pick()
                     self.count_routing("bound_hit")
                     return account
-                # 绑定指向的账号此刻不能接单（冷却、限额、令牌失效）：这段
-                # 对话只能换号，前端缓存要在新账号上重建一次。
-                return self._rebind(realm, session_key, exclude, model)
+                # 绑定的账号此刻不能接单（冷却、限额、令牌失效、名额满）：换号
+                # 并重新绑定，接手账号重算完整前缀后，缓存就跟着它。
+                return self._rebind(realm, session_key, exclude, model, claim)
             if bound_uid:
                 # 调用方把这个账号排除在外（原地重试用完、正在换号）：这段
                 # 对话同样要落到别的账号上，计数与绑定失效走同一条路。
-                return self._rebind(realm, session_key, exclude, model)
-            account = self.pick(realm=realm, exclude=exclude, model=model)
+                return self._rebind(realm, session_key, exclude, model, claim)
+            account = self.pick(realm=realm, exclude=exclude, model=model, claim=claim)
             if account:
                 self.affinity.bind(session_key, account.uid)
                 self.count_routing("fresh_binding")
             return account
         self.count_routing("no_key")
-        return self.pick(realm=realm, exclude=exclude, model=model)
+        return self.pick(realm=realm, exclude=exclude, model=model, claim=claim)
 
-    def _rebind(self, realm, session_key, exclude, model):
+    def _rebind(self, realm, session_key, exclude, model, claim=None):
         """换一个账号接手这段对话，并把这次换号记进打点。
 
         调用方把一个账号排除在外与绑定失效的后果相同：这段对话要落到别的
@@ -1625,18 +1724,18 @@ class AccountPool(object):
         """
         self.affinity.unbind(session_key)
         self.count_routing("bound_lost")
-        account = self.pick(realm=realm, exclude=exclude, model=model)
+        account = self.pick(realm=realm, exclude=exclude, model=model, claim=claim)
         if account:
             self.affinity.bind(session_key, account.uid)
         return account
 
-    def pick(self, realm=None, exclude=None, model=None):
+    def pick(self, realm=None, exclude=None, model=None, claim=None):
         """选一个能接单的账号：评分分配或者原来的轮询顺序。"""
         if self.smart_routing:
-            return self._pick_scored(realm=realm, exclude=exclude, model=model)
-        return self._pick_cursor(realm=realm, exclude=exclude, model=model)
+            return self._pick_scored(realm=realm, exclude=exclude, model=model, claim=claim)
+        return self._pick_cursor(realm=realm, exclude=exclude, model=model, claim=claim)
 
-    def _pick_cursor(self, realm=None, exclude=None, model=None):
+    def _pick_cursor(self, realm=None, exclude=None, model=None, claim=None):
         exclude = exclude or set()
         with self._lock:
             snapshot = [a for a in self.accounts if not realm or a.realm == realm]
@@ -1651,14 +1750,14 @@ class AccountPool(object):
         for index in order:
             account = snapshot[index]
             if account.uid in exclude: continue
-            if account.ready(model=model):
+            if account.ready(model=model) and _claim(account, model, claim):
                 with self._lock: self._cursor = (index + 1) % total
                 self.count_routing("cursor_pick")
                 account.mark_pick()
                 return account
         return None
 
-    def _pick_scored(self, realm=None, exclude=None, model=None):
+    def _pick_scored(self, realm=None, exclude=None, model=None, claim=None):
         """按积分到期节奏与最近一小时的忙闲给新对话选号。
 
         每个账号到期前每天至少要消耗掉的积分是它的义务，义务减去今天的消耗
@@ -1681,7 +1780,8 @@ class AccountPool(object):
         if total == 0: return None
         now = time.time()
         candidates = [index for index, account in enumerate(snapshot)
-                      if account.uid not in exclude and account.servable(model=model)]
+                      if account.uid not in exclude and account.servable(model=model)
+                      and account.has_request_capacity(model)]
         if not candidates: return None
         targets = {index: snapshot[index].credit_target_per_day(now=now) for index in candidates}
         known = sorted(t for t in targets.values() if t is not None)
@@ -1708,7 +1808,7 @@ class AccountPool(object):
         ranked.sort()
         for _score, _share, _hour, _priority, _offset, index in ranked:
             account = snapshot[index]
-            if account.ready(model=model):
+            if account.ready(model=model) and _claim(account, model, claim):
                 with self._lock: self._cursor = (index + 1) % total
                 self.count_routing("smart_pick")
                 account.mark_pick(now)
@@ -2094,4 +2194,9 @@ def normalise_import_row(row, realm=None):
     note = pick("note")
     if note is not None:
         kwargs["note"] = _stored_note(note)
+    # 并发上限也是面板设置，与优先级、备注同一个口径：导出文档带着它，
+    # 外来行不带时保留已存的值。
+    concurrency = pick("concurrencyLimit")
+    if concurrency is not None:
+        kwargs["concurrencyLimit"] = _stored_concurrency_limit(concurrency)
     return kwargs

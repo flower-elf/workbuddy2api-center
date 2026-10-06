@@ -215,6 +215,27 @@ assert.equal(logic.parsePriorityInput('').ok, false);
 assert.equal(logic.parsePriorityInput('abc').ok, false);
 assert.equal(logic.parsePriorityInput('3.5').ok, false);
 
+// ---- 单账号单模型的并发上限：0 或空表示不限，其余必须是 0 到 1000 的整数
+assert.deepEqual(logic.parseConcurrencyInput(''), { ok: true, value: 0 });
+assert.deepEqual(logic.parseConcurrencyInput(' 0 '), { ok: true, value: 0 });
+assert.deepEqual(logic.parseConcurrencyInput('4'), { ok: true, value: 4 });
+assert.deepEqual(logic.parseConcurrencyInput(1000), { ok: true, value: 1000 });
+assert.equal(logic.parseConcurrencyInput('1001').ok, false);
+assert.equal(logic.parseConcurrencyInput('-1').ok, false);
+assert.equal(logic.parseConcurrencyInput('2.5').ok, false);
+assert.equal(logic.parseConcurrencyInput('abc').ok, false);
+assert.ok(logic.parseConcurrencyInput('1001').message.includes('0 表示不限'),
+  '拒绝时要说清填 0 表示不限，否则操作员不知道怎么关掉');
+
+// 旧账号没有这个字段，必须当作不限（0），不能显示成空白或 NaN
+assert.equal(logic.concurrencyOf(base()), 0, '没设过的账号按不限处理');
+assert.equal(logic.concurrencyOf(base({ concurrencyLimit: 3 })), 3);
+assert.equal(logic.concurrencyOf(base({ concurrencyLimit: 0 })), 0);
+assert.equal(logic.concurrencyOf(base({ concurrencyLimit: -2 })), 0, '手工改坏的负数按不限处理');
+assert.equal(logic.concurrencyOf(base({ concurrencyLimit: 'x' })), 0);
+assert.equal(logic.activeRequestsOf(base()), 0);
+assert.equal(logic.activeRequestsOf(base({ activeRequests: 2 })), 2);
+
 // ---- 心跳重绘时的草稿：只有正在编辑的那个框用草稿值
 const draft = { uid: 'uid-a', field: 'priority', value: '7', start: 1, end: 1 };
 assert.equal(logic.draftFor(draft, 'uid-a', 'priority'), '7');

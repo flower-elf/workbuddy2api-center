@@ -15,8 +15,9 @@
 .table-accounts th:nth-child(5) { width: 148px; }
 .table-accounts th:nth-child(6) { width: 168px; }
 .table-accounts th:nth-child(7) { width: 104px; }
-.table-accounts th:nth-child(8) { width: 96px; }
-.table-accounts th:nth-child(9) { width: 120px; }
+.table-accounts th:nth-child(8) { width: 104px; }
+.table-accounts th:nth-child(9) { width: 96px; }
+.table-accounts th:nth-child(10) { width: 120px; }
 .table-accounts td { vertical-align: middle; }
 /* 表头与数据都居中，每列内容与标题对齐 */
 .table-accounts th,
@@ -69,7 +70,7 @@
 .mobile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .mobile-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mobile-field .select, .mobile-field .input { width: 100%; }
-.mobile-field .input-priority { width: 72px; }
+.mobile-field .input-priority, .mobile-field .input-concurrency { width: 72px; }
 .mobile-item .row-actions { justify-content: flex-start; }
 
 .card-note {

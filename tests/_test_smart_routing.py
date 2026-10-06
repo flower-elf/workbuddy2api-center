@@ -388,7 +388,7 @@ class TransientRetryTests(unittest.TestCase):
         self._install(replies)
         with self.assertRaises(expected):
             P.open_upstream(self._payload(), session_key=session_key,
-                            target_realm="cn")
+                            target_realm="cn", lease=P.SlotLease())
 
     def test_a_5xx_is_absorbed_by_an_in_place_retry(self):
         ok = object()
@@ -402,7 +402,8 @@ class TransientRetryTests(unittest.TestCase):
 
     def _drive_until_ok(self, replies, session_key="s-transient"):
         self._install(replies)
-        return P.open_upstream(self._payload(), session_key=session_key, target_realm="cn")
+        return P.open_upstream(self._payload(), session_key=session_key, target_realm="cn",
+                               lease=P.SlotLease())
 
     def test_a_connection_hiccup_is_absorbed_by_an_in_place_retry(self):
         ok = object()
@@ -418,13 +419,15 @@ class TransientRetryTests(unittest.TestCase):
         self._install([ok])
         wb_settings.set_session_affinity(P.ACCOUNTS_DIR, False)
         self.addCleanup(wb_settings.set_session_affinity, P.ACCOUNTS_DIR, True)
-        uids = [P.open_upstream(self._payload(), session_key="s-off", target_realm="cn")[1].uid
+        uids = [P.open_upstream(self._payload(), session_key="s-off", target_realm="cn",
+                                lease=P.SlotLease())[1].uid
                 for _ in range(2)]
         self.assertEqual(uids, ["uid-a", "uid-b"], "关闭会话粘性后同一对话还固定在一个账号上")
         self.assertIsNone(self.pool.affinity.get("s-off"))
 
         wb_settings.set_session_affinity(P.ACCOUNTS_DIR, True)
-        uids = [P.open_upstream(self._payload(), session_key="s-on", target_realm="cn")[1].uid
+        uids = [P.open_upstream(self._payload(), session_key="s-on", target_realm="cn",
+                                lease=P.SlotLease())[1].uid
                 for _ in range(2)]
         self.assertEqual(uids[0], uids[1], "默认的会话粘性没有生效")
 

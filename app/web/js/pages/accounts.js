@@ -496,6 +496,43 @@ export function mount(host) {
              @change=${(event) => onPriorityChange(account, event.target.value)}>`;
   }
 
+  function concurrencyInput(account) {
+    const draft = logic.draftFor(S.draft, logic.uidAttr(account.uid), 'concurrency');
+    const value = draft === null ? String(logic.concurrencyOf(account)) : draft;
+    const busy = logic.activeRequestsOf(account);
+    return html`
+      <input class="input input-num input-sm input-concurrency" type="number" min="0" max="1000" step="1"
+             data-draft="concurrency" data-uid=${logic.uidAttr(account.uid)}
+             title=${'单账号单模型的并发上限：同一账号每个模型各自计数，0 表示不限。当前正在服务 ' + busy + ' 个请求。'}
+             .value=${live(value)}
+             @change=${(event) => onConcurrencyChange(account, event.target.value)}>`;
+  }
+
+  function onConcurrencyChange(account, raw) {
+    const parsed = logic.parseConcurrencyInput(raw);
+    if (!parsed.ok) {
+      toast.warn(parsed.message);
+      draw();
+      return;
+    }
+    if (parsed.value === logic.concurrencyOf(account)) {
+      draw();
+      return;
+    }
+    setConcurrencyLimit(account.uid, parsed.value);
+  }
+
+  async function setConcurrencyLimit(uid, concurrencyLimit) {
+    try {
+      await acct.setConcurrencyLimit(uid, concurrencyLimit);
+      toast.success('并发上限已更新');
+      await refresh();
+    } catch (err) {
+      toastError('并发上限更新失败', err);
+      draw();
+    }
+  }
+
   function rowActions(account) {
     const name = account.nickname || String(account.uid || '').slice(0, 8);
     return html`
@@ -525,6 +562,7 @@ export function mount(host) {
         <td>${slotSelect(account)}</td>
         <td>${identitySelect(account)}</td>
         <td>${priorityInput(account)}</td>
+        <td>${concurrencyInput(account)}</td>
         <td class="right">${usageInfo(account)}</td>
         <td class="actions">${rowActions(account)}</td>
       </tr>`;
@@ -562,6 +600,10 @@ export function mount(host) {
           <div class="mobile-field">
             <span class="field-label">优先级</span>
             ${priorityInput(account)}
+          </div>
+          <div class="mobile-field">
+            <span class="field-label">并发上限</span>
+            ${concurrencyInput(account)}
           </div>
           <div class="mobile-field">
             <span class="field-label">用量</span>
@@ -650,6 +692,7 @@ export function mount(host) {
                 <th>出口</th>
                 <th>身份</th>
                 <th>优先级</th>
+                <th>并发上限</th>
                 <th class="right">用量</th>
                 <th class="actions">操作</th>
               </tr>

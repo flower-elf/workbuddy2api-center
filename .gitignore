@@ -29,3 +29,6 @@ usage/*.bak*
 
 # Local Docker Compose override
 docker-compose.override.yml
+
+# 本地构建产物（镜像 tar 等）
+dist/

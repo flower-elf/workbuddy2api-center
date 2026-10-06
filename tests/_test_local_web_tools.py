@@ -194,7 +194,7 @@ class FakeHandler(object):
 opened = []
 
 
-def fake_open_upstream(body, session_key=None, target_realm=None):
+def fake_open_upstream(body, session_key=None, target_realm=None, **kwargs):
     opened.append(body)
     return FakeUpstream(sse(ANSWER_CHUNKS)), FakeAccount(), None
 
@@ -220,7 +220,7 @@ with mock.patch.multiple(proxy,
     handler._responses_stream_response(
         FakeUpstream(sse(TOOL_CHUNKS)), "deepseek-v4.1-flash", set(), {}, "fp",
         FakeAccount(), 0.0, None, base_body=chat_body,
-        session_key="sess", realm="intl")
+        session_key="sess", realm="intl", lease=proxy.SlotLease())
 
 body = b"".join(handler.written).decode("utf-8", "replace")
 check("the browser got a 200 stream", ("status", 200) in handler.headers_sent, handler.headers_sent[:2])
@@ -245,7 +245,7 @@ print("[5] when the rounds run out the tools are withdrawn, not faked")
 calls = {"n": 0}
 
 
-def always_tool_body(body, session_key=None, target_realm=None):
+def always_tool_body(body, session_key=None, target_realm=None, **kwargs):
     calls["n"] += 1
     calls.setdefault("bodies", []).append(body)
     if calls["n"] > W.MAX_WEB_ROUNDS:
@@ -264,7 +264,7 @@ with mock.patch.multiple(proxy,
     handler2._responses_stream_response(
         FakeUpstream(sse(TOOL_CHUNKS)), "deepseek-v4.1-flash", set(), {}, "fp",
         FakeAccount(), 0.0, None, base_body=dict(chat_body),
-        session_key="sess", realm="intl")
+        session_key="sess", realm="intl", lease=proxy.SlotLease())
 
 body2 = b"".join(handler2.written).decode("utf-8", "replace")
 check("it stops after MAX_WEB_ROUNDS extra calls", calls["n"] <= W.MAX_WEB_ROUNDS + 1, calls["n"])
@@ -333,7 +333,7 @@ def fake_aggregate(upstream, model, sink, *a, **k):
     return CHAT_CALL if seen["aggregate"] == 1 else CHAT_DONE
 
 
-def capture_open(body, session_key=None, target_realm=None):
+def capture_open(body, session_key=None, target_realm=None, **kwargs):
     seen["bodies"].append(body)
     return FakeUpstream(sse(ANSWER_CHUNKS)), FakeAccount(), None
 
@@ -364,7 +364,7 @@ with mock.patch.multiple(proxy,
     jh._responses_nonstream_response(
         FakeUpstream(sse(TOOL_CHUNKS)), "deepseek-v4.1-flash", set(), {}, "fp",
         FakeAccount(), 0.0, None, base_body=dict(chat_body),
-        session_key="sess", realm="intl")
+        session_key="sess", realm="intl", lease=proxy.SlotLease())
 
 out = (jh.json_body or {}).get("output") or []
 kinds = [o.get("type") for o in out]
@@ -384,7 +384,7 @@ print("[9] with the switch off the client's own call is forwarded, not run")
 passthrough = []
 
 
-def passthrough_open(body, session_key=None, target_realm=None):
+def passthrough_open(body, session_key=None, target_realm=None, **kwargs):
     passthrough.append(body)
     return FakeUpstream(sse(ANSWER_CHUNKS)), FakeAccount(), None
 
@@ -402,7 +402,7 @@ with mock.patch.multiple(proxy,
         FakeAccount(), 0.0, None,
         base_body={"model": "m", "messages": [{"role": "user", "content": "hi"}],
                    "tools": [W.web_search_tool_def()], "stream": True},
-        session_key="sess", realm="intl")
+        session_key="sess", realm="intl", lease=proxy.SlotLease())
 
 body3 = b"".join(handler3.written).decode("utf-8", "replace")
 check("the client receives its own web_search call", '"name": "web_search"' in body3, body3[-300:])
